@@ -1,0 +1,19 @@
+# Clair 运行产物与本地数据
+# clair-log.txt 是"导出日志"功能保存的日志文件副本
+clair-log.txt
+# 若把播放器指向本项目目录作为音乐库，会生成 .Clair 本地数据
+.Clair/
+
+# 元数据工具重写 FLAC 时的临时文件（xxx.flac.clair-auto-<pid>.tmp 等）
+*.clair-*.tmp
+
+# 系统与编辑器文件
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Node 依赖（当前无 package.json，预留）
+node_modules/
+
+# 代理工具工作区
+.agents/
