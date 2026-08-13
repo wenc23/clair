@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#11130f" />
+    <title>Clair — 古典音乐播放器</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-theme="nocturne">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-record"><span>C</span></div>
+          <div>
+            <strong>Clair</strong>
+            <small>CLASSICAL LISTENING</small>
+          </div>
+        </div>
+
+        <nav class="main-nav" aria-label="主导航">
+          <button class="nav-button is-active" data-view="player">
+            <span class="nav-icon">◉</span>
+            <span>正在聆听</span>
+          </button>
+          <button class="nav-button" data-view="library">
+            <span class="nav-icon">≡</span>
+            <span>音乐库</span>
+            <em id="nav-track-count">0</em>
+          </button>
+          <button class="nav-button" data-view="logs">
+            <span class="nav-icon">⌁</span>
+            <span>运行日志</span>
+            <em id="nav-log-count">0</em>
+          </button>
+        </nav>
+
+        <section class="source-card">
+          <p class="section-kicker">LOCAL LIBRARY</p>
+          <h2>连接音乐目录</h2>
+          <p>授权后可读取、重命名和写入 FLAC 标签；日志、索引与设置保存在目录内的 .Clair。</p>
+          <button class="primary-button" id="choose-library">选择音乐文件夹</button>
+          <div class="source-state">
+            <span class="state-dot"></span>
+            <span id="source-state">尚未连接</span>
+          </div>
+          <p class="local-data-state" id="local-data-state">本地数据：连接后创建 .Clair</p>
+        </section>
+
+        <label class="theme-field">
+          <span>界面主题</span>
+          <select id="theme-select">
+            <option value="nocturne">夜曲黑</option>
+            <option value="ivory">象牙白</option>
+            <option value="ocean">深海蓝</option>
+          </select>
+        </label>
+      </aside>
+
+      <main class="main-area">
+        <header class="topbar">
+          <div>
+            <p class="section-kicker" id="page-kicker">NOW PLAYING</p>
+            <h1 id="page-title">正在聆听</h1>
+          </div>
+          <div class="topbar-actions">
+            <span class="signal-badge" id="signal-badge">等待载入音频</span>
+            <button class="icon-button" id="open-sound" aria-label="打开音效设置">◌</button>
+          </div>
+        </header>
+
+        <div class="view-stack">
+          <section class="view is-active" id="player-view" data-view-panel="player">
+            <div class="now-layout">
+              <article class="art-panel">
+                <div class="cover-shell" id="cover-shell">
+                  <img id="cover-image" alt="专辑封面" />
+                  <div class="cover-placeholder">
+                    <span id="cover-letter">C</span>
+                    <small>CLAIR EDITION</small>
+                  </div>
+                </div>
+                <div class="record-spine">
+                  <span id="spine-album">本地音乐库</span>
+                  <span id="spine-year">—</span>
+                </div>
+              </article>
+
+              <article class="track-panel">
+                <div class="track-heading">
+                  <p id="now-work">请选择一首曲目</p>
+                  <h2 id="now-title">让音乐成为可见的风景</h2>
+                  <p id="now-credit">连接本地音乐文件夹后开始聆听</p>
+                </div>
+                <div class="track-actions">
+                  <button class="ghost-button" id="favorite-current">♡ 收藏</button>
+                  <button class="ghost-button" id="edit-current-tags" disabled>编辑 FLAC 元数据</button>
+                  <button class="ghost-button" data-view-jump="library">查看音乐库</button>
+                </div>
+                <dl class="metadata-grid">
+                  <div><dt>歌手 / 独奏</dt><dd id="meta-artist">—</dd></div>
+                  <div><dt>指挥家</dt><dd id="meta-conductor">—</dd></div>
+                  <div><dt>乐团</dt><dd id="meta-orchestra">—</dd></div>
+                  <div><dt>作曲家</dt><dd id="meta-composer">—</dd></div>
+                  <div><dt>年代</dt><dd id="meta-year">—</dd></div>
+                  <div><dt>专辑</dt><dd id="meta-album">—</dd></div>
+                </dl>
+              </article>
+            </div>
+
+            <article class="spectrum-card">
+              <div class="card-heading">
+                <div>
+                  <p class="section-kicker">REAL-TIME ANALYZER</p>
+                  <h3>对数频谱与波形</h3>
+                </div>
+                <div class="analyzer-state">
+                  <span id="analyzer-level">IDLE</span>
+                  <span id="analyzer-rate">25 Hz — 20 kHz</span>
+                </div>
+              </div>
+              <canvas id="visualizer" aria-label="实时音频频谱"></canvas>
+              <div class="spectrum-scale" aria-hidden="true">
+                <span>25</span><span>60</span><span>125</span><span>250</span>
+                <span>500</span><span>1k</span><span>2k</span><span>4k</span>
+                <span>8k</span><span>16k</span>
+              </div>
+            </article>
+
+            <section class="audio-facts" aria-label="音频技术信息">
+              <div><span>格式</span><strong id="audio-format">—</strong></div>
+              <div><span>采样率</span><strong id="audio-sample-rate">—</strong></div>
+              <div><span>位深</span><strong id="audio-bit-depth">—</strong></div>
+              <div><span>码率</span><strong id="audio-bitrate">—</strong></div>
+              <div><span>声道</span><strong id="audio-channels">—</strong></div>
+              <div><span>时长</span><strong id="audio-duration">—</strong></div>
+            </section>
+          </section>
+
+          <section class="view" id="library-view" data-view-panel="library">
+            <div class="library-toolbar">
+              <label class="search-field">
+                <span>搜索</span>
+                <input id="library-search" type="search" placeholder="曲名、歌手、指挥、乐团、作曲家、年代…" />
+              </label>
+              <label>
+                <span>组织方式</span>
+                <select id="group-mode">
+                  <option value="folder">目录树</option>
+                  <option value="album">专辑</option>
+                  <option value="artist">艺术家</option>
+                  <option value="classical">古典作品</option>
+                  <option value="smart">智能收藏</option>
+                  <option value="year">年代</option>
+                </select>
+              </label>
+              <label>
+                <span>排序</span>
+                <select id="sort-mode">
+                  <option value="path">原始路径</option>
+                  <option value="title">曲名</option>
+                  <option value="artist">歌手 / 独奏</option>
+                  <option value="year">年代</option>
+                </select>
+              </label>
+              <button class="secondary-button" id="refresh-library">刷新</button>
+              <button class="secondary-button" id="health-check">音乐库体检</button>
+            </div>
+
+            <div class="management-bar">
+              <div>
+                <button class="text-button" id="select-visible">全选当前结果</button>
+                <button class="text-button" id="clear-selection">取消选择</button>
+                <button class="text-button" id="collapse-groups">全部折叠</button>
+                <button class="text-button" id="expand-groups">全部展开</button>
+                <button class="text-button" id="rename-current">重命名当前曲目</button>
+                <button class="text-button" id="toggle-trash">查看回收站</button>
+                <button class="text-button" id="export-m3u">导出 M3U</button>
+              </div>
+              <button class="danger-button" id="trash-selected">移至回收站 (0)</button>
+              <button class="primary-button is-hidden" id="restore-selected">恢复已选择 (0)</button>
+            </div>
+
+            <div class="health-panel is-hidden" id="health-panel">
+              <div><span>曲目总数</span><strong id="health-total">0</strong></div>
+              <div><span>疑似重复组</span><strong id="health-duplicates">0</strong></div>
+              <div><span>古典录音</span><strong id="health-classical">0</strong></div>
+              <div><span>基础资料缺失</span><strong id="health-core">0</strong></div>
+              <div><span>古典资料缺失</span><strong id="health-classical-incomplete">0</strong></div>
+              <div><span>缺少年代</span><strong id="health-year">0</strong></div>
+            </div>
+
+            <div class="library-summary">
+              <span id="library-summary">0 首曲目</span>
+              <span id="selection-summary">未选择</span>
+            </div>
+            <div class="track-list" id="track-list"></div>
+          </section>
+
+          <section class="view" id="logs-view" data-view-panel="logs">
+            <div class="log-toolbar">
+              <label>
+                <span>级别</span>
+                <select id="log-level">
+                  <option value="all">全部</option>
+                  <option value="info">信息</option>
+                  <option value="warn">警告</option>
+                  <option value="error">错误</option>
+                  <option value="debug">调试</option>
+                </select>
+              </label>
+              <button class="secondary-button" id="run-diagnostics">运行诊断</button>
+              <button class="secondary-button" id="export-logs">导出日志</button>
+              <button class="secondary-button" id="clear-logs">清空日志</button>
+            </div>
+            <div class="log-summary">
+              <span>日志同步保存到音乐目录的 .Clair/clair.log，并保留最近 500 条用于页面查看。</span>
+              <strong id="log-summary">0 条</strong>
+            </div>
+            <div class="log-list" id="log-list"></div>
+          </section>
+        </div>
+      </main>
+
+      <footer class="transport">
+        <div class="transport-track">
+          <div class="mini-cover" id="mini-cover"><span>C</span></div>
+          <div>
+            <strong id="transport-title">尚未播放</strong>
+            <span id="transport-artist">请选择曲目</span>
+          </div>
+        </div>
+        <div class="transport-center">
+          <div class="transport-buttons">
+            <button id="shuffle" aria-label="随机播放">⇄</button>
+            <button id="previous" aria-label="上一首">↤</button>
+            <button class="play-button" id="play" aria-label="播放">▶</button>
+            <button id="next" aria-label="下一首">↦</button>
+            <button id="repeat" aria-label="循环模式">↻</button>
+          </div>
+          <div class="timeline-row">
+            <span id="current-time">00:00</span>
+            <input id="seek" type="range" min="0" max="1000" value="0" aria-label="播放进度" />
+            <span id="total-time">00:00</span>
+          </div>
+        </div>
+        <div class="transport-volume">
+          <span>VOL</span>
+          <input id="volume" type="range" min="0" max="1" step="0.01" value="0.8" />
+        </div>
+      </footer>
+    </div>
+
+    <audio id="audio" preload="metadata"></audio>
+
+    <dialog id="tag-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div><p class="section-kicker">FLAC VORBIS COMMENT</p><h2>编辑 FLAC 内部元数据</h2></div>
+          <button value="cancel" aria-label="关闭">×</button>
+        </div>
+        <p class="dialog-note">保存时会直接重建 FLAC 的 Vorbis Comment 元数据块，并在写入后重新读取校验；音频帧、封面及其他元数据块保持不变。原始标签会先备份到 .Clair/metadata-backups。</p>
+        <p class="dialog-target" id="tag-write-target"></p>
+        <div class="form-grid">
+          <label>曲名<input id="tag-title" /></label>
+          <label>歌手 / 独奏<input id="tag-artist" /></label>
+          <label>指挥家<input id="tag-conductor" /></label>
+          <label>乐团<input id="tag-orchestra" /></label>
+          <label>作曲家<input id="tag-composer" /></label>
+          <label>专辑<input id="tag-album" /></label>
+          <label>作品<input id="tag-work" /></label>
+          <label>年代<input id="tag-year" /></label>
+        </div>
+        <div class="dialog-actions">
+          <button value="cancel" class="secondary-button">取消</button>
+          <button type="button" class="primary-button" id="save-tags">写入 FLAC 文件</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="sound-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div><p class="section-kicker">AUDIO ENGINE</p><h2>聆听设置</h2></div>
+          <button value="cancel" aria-label="关闭">×</button>
+        </div>
+        <div class="form-grid">
+          <label>低频<input id="eq-low" type="range" min="-12" max="12" value="0" /></label>
+          <label>中频<input id="eq-mid" type="range" min="-12" max="12" value="0" /></label>
+          <label>高频<input id="eq-high" type="range" min="-12" max="12" value="0" /></label>
+          <label>左右平衡<input id="balance" type="range" min="-1" max="1" value="0" step="0.05" /></label>
+        </div>
+        <p class="dialog-note">浏览器输出受系统混音影响，不承诺位完美输出。</p>
+        <div class="dialog-actions"><button value="cancel" class="primary-button">完成</button></div>
+      </form>
+    </dialog>
+
+  <script src="library-model.js"></script>
+  <script src="flac-metadata.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

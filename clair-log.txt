@@ -1,0 +1,113 @@
+[2026-07-23T16:30:04.618Z] DEBUG ui: 已切换界面主题 | nocturne
+[2026-07-23T16:30:04.630Z] INFO system: Clair 已启动 | 可视化引擎正在运行
+[2026-07-23T16:30:19.801Z] INFO permission: 用户已授权音乐文件夹 | Music
+[2026-07-23T16:30:20.073Z] INFO library: 开始解析 171 首曲目
+[2026-07-23T16:30:45.152Z] DEBUG ui: 已切换界面主题 | ocean
+[2026-07-23T16:30:47.084Z] DEBUG ui: 已切换界面主题 | ivory
+[2026-07-23T16:30:48.701Z] DEBUG ui: 已切换界面主题 | nocturne
+[2026-07-23T16:30:50.469Z] DEBUG ui: 已切换界面主题 | ocean
+[2026-07-23T16:30:50.715Z] INFO library: 音乐库载入完成 | 171 首
+[2026-07-23T16:31:03.082Z] INFO health: 音乐库体检完成 | 0 组疑似重复
+[2026-07-23T16:31:09.578Z] INFO audio: 音频分析与 EQ 引擎已初始化 | 48000 Hz
+[2026-07-23T16:31:09.593Z] INFO playback: 开始播放 | God knows
+[2026-07-23T16:32:01.760Z] INFO playback: 开始播放 | 音轨04
+[2026-07-23T16:32:23.951Z] DEBUG ui: 已切换界面主题 | ivory
+[2026-07-23T16:32:25.038Z] DEBUG ui: 已切换界面主题 | ocean
+[2026-07-23T16:33:11.239Z] INFO playback: 开始播放 | 17
+[2026-07-23T16:33:11.378Z] INFO playback: 开始播放 | 17
+[2026-07-23T16:33:46.072Z] INFO playback: 开始播放 | 音轨01
+[2026-07-23T16:34:16.509Z] INFO metadata: 已保存本地歌曲信息覆盖 | IRIS OUT
+[2026-07-23T16:35:07.487Z] DEBUG playback: 循环模式已切换 | one
+[2026-07-23T16:35:08.355Z] DEBUG playback: 循环模式已切换 | off
+[2026-07-23T16:35:08.961Z] DEBUG playback: 循环模式已切换 | all
+[2026-07-23T16:35:09.906Z] DEBUG playback: 循环模式已切换 | one
+[2026-07-23T16:35:10.520Z] DEBUG playback: 循环模式已切换 | off
+[2026-07-23T16:35:11.664Z] INFO playback: 开始播放 | 音轨02
+[2026-07-23T16:35:14.755Z] INFO playback: 开始播放 | 音轨01
+[2026-07-23T16:35:20.209Z] INFO playback: 开始播放 | 音轨02
+[2026-07-23T16:35:25.369Z] INFO playback: 开始播放 | キセキ
+[2026-07-23T16:35:28.937Z] INFO playback: 开始播放 | ǧ��ӣ
+[2026-07-23T16:35:40.991Z] WARN files: 尚未选择要移入回收站的文件
+[2026-07-23T16:35:50.370Z] INFO playback: 开始播放 | God knows
+[2026-07-23T16:35:54.468Z] INFO playback: 开始播放 | ���Ů
+[2026-07-23T16:35:57.227Z] INFO playback: 开始播放 | ��������
+[2026-07-23T16:36:02.421Z] INFO files: 移至回收站成功 | Music/artchive/和楽器バンド-千本樱.flac
+[2026-07-23T16:36:02.668Z] INFO library: 开始解析 170 首曲目
+[2026-07-23T16:36:07.783Z] WARN playback: 播放失败：尚未选择曲目
+[2026-07-23T16:36:12.572Z] INFO playback: 开始播放 | God knows
+[2026-07-23T16:36:12.575Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T16:36:12.576Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T16:36:16.426Z] ERROR playback: 播放失败 | The element has no supported sources.
+[2026-07-23T16:36:17.563Z] INFO playback: 开始播放 | 春はゆく
+[2026-07-23T16:36:17.568Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T16:36:17.569Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T16:36:18.772Z] ERROR playback: 播放失败 | The element has no supported sources.
+[2026-07-23T16:36:19.323Z] DEBUG playback: 循环模式已切换 | all
+[2026-07-23T16:36:20.042Z] INFO playback: 开始播放 | 春はゆく
+[2026-07-23T16:36:20.046Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T16:36:20.048Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T16:36:20.573Z] INFO playback: 开始播放 | ���Ů
+[2026-07-23T16:36:20.578Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T16:36:20.580Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T16:36:21.348Z] INFO playback: 开始播放 | 春はゆく
+[2026-07-23T16:36:21.352Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T16:36:21.354Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T16:36:24.181Z] DEBUG ui: 已切换界面主题 | ocean
+[2026-07-23T16:36:24.185Z] INFO system: Clair 已启动 | 可视化引擎正在运行
+[2026-07-23T16:36:24.247Z] INFO permission: 已恢复音乐文件夹授权 | Music
+[2026-07-23T16:36:25.332Z] INFO library: 开始解析 170 首曲目
+[2026-07-23T16:36:55.786Z] INFO library: 音乐库载入完成 | 170 首
+[2026-07-23T16:44:30.120Z] DEBUG ui: 已切换界面主题 | ocean
+[2026-07-23T16:44:30.140Z] INFO system: Clair 2.1.0 已启动 | 可视化引擎正在运行
+[2026-07-23T16:44:42.029Z] INFO permission: 用户已授权音乐文件夹 | Music
+[2026-07-23T16:44:42.300Z] INFO library: 开始解析 170 首曲目
+[2026-07-23T16:45:12.745Z] INFO library: 音乐库载入完成 | 170 首
+[2026-07-23T16:45:15.222Z] DEBUG library: 已折叠分组 | Music / artchive
+[2026-07-23T16:45:16.011Z] DEBUG library: 已折叠分组 | Music / EAC / BEETHOVEN SYMPHONIE NO.9_ABBADO
+[2026-07-23T16:45:16.701Z] DEBUG library: 已折叠分组 | Music / EAC / IRIS OUT
+[2026-07-23T16:45:17.460Z] DEBUG library: 已折叠分组 | Music / EAC / MENDELSSOHN E小调小提琴协奏曲
+[2026-07-23T16:45:18.167Z] DEBUG library: 已折叠分组 | Music / EAC / one last kiss
+[2026-07-23T16:45:18.686Z] DEBUG library: 已折叠分组 | Music / EAC / RACHMANINOV Symphony No.2_PREVIN
+[2026-07-23T16:45:19.143Z] DEBUG library: 已折叠分组 | Music / EAC / SIBELIUS D小调小提琴协奏曲
+[2026-07-23T16:47:38.139Z] DEBUG library: 已展开分组 | Music / artchive
+[2026-07-23T16:47:39.009Z] DEBUG library: 已折叠分组 | Music / artchive
+[2026-07-23T17:03:44.017Z] DEBUG ui: 已切换界面主题 | ocean
+[2026-07-23T17:03:44.104Z] INFO system: Clair 3.0.0 已启动 | 可视化引擎正在运行
+[2026-07-23T17:03:44.765Z] INFO permission: 已恢复音乐文件夹授权 | Music
+[2026-07-23T17:03:45.084Z] INFO library: 开始解析 181 首曲目
+[2026-07-23T17:03:54.025Z] INFO permission: 用户已授权音乐文件夹 | Music
+[2026-07-23T17:03:54.882Z] INFO library: 开始解析 181 首曲目
+[2026-07-23T17:04:21.275Z] INFO library: 音乐库载入完成 | 181 首
+[2026-07-23T17:04:21.279Z] INFO library: 音乐库载入完成 | 181 首
+[2026-07-23T17:04:23.902Z] INFO audio: 音频分析与 EQ 引擎已初始化 | 48000 Hz
+[2026-07-23T17:04:23.912Z] INFO playback: 开始播放 | Automatic
+[2026-07-23T17:04:23.918Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T17:04:23.921Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T17:04:27.578Z] INFO playback: 开始播放 | Automatic
+[2026-07-23T17:04:27.581Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T17:04:27.584Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T17:04:27.717Z] INFO playback: 开始播放 | Automatic
+[2026-07-23T17:04:27.720Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T17:04:27.723Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T17:04:29.005Z] ERROR playback: 播放失败 | The element has no supported sources.
+[2026-07-23T17:04:35.890Z] INFO playback: 开始播放 | In My Room
+[2026-07-23T17:04:35.893Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T17:04:35.897Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T17:04:36.062Z] INFO playback: 开始播放 | In My Room
+[2026-07-23T17:04:36.065Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T17:04:36.068Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T17:04:38.407Z] INFO playback: 开始播放 | Automatic
+[2026-07-23T17:04:38.411Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T17:04:38.414Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T17:04:38.579Z] INFO playback: 开始播放 | Automatic
+[2026-07-23T17:04:38.582Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T17:04:38.585Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T17:04:57.050Z] DEBUG library: 已折叠分组 | Music / 宇多田光 - First Love (2014 Remaster) (Hi-Res FLAC 24bit 96kHz)
+[2026-07-23T17:04:57.908Z] DEBUG library: 已展开分组 | Music / artchive
+[2026-07-23T17:04:58.564Z] INFO playback: 开始播放 | God knows
+[2026-07-23T17:04:58.570Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T17:04:58.573Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T17:04:58.736Z] INFO playback: 开始播放 | God knows
+[2026-07-23T17:04:58.742Z] ERROR playback: 音频文件无法播放 | MEDIA_ELEMENT_ERROR: Format error
+[2026-07-23T17:04:58.747Z] WARN playback: 浏览器阻止了自动播放 | Failed to load because no supported source was found.
+[2026-07-23T17:05:01.823Z] ERROR playback: 播放失败 | The element has no supported sources.
