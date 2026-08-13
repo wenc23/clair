@@ -1,5 +1,7 @@
 # Clair
 
+![CI](https://github.com/wenc23/clair/actions/workflows/ci.yml/badge.svg)
+
 Clair 是一款面向古典音乐收藏的本地 Web 播放器，主要用于播放、整理和检查 FLAC 音乐库。界面分为“正在聆听”“音乐库”“运行日志”三个页面。
 
 ## 主要功能
@@ -40,6 +42,16 @@ node server.cjs
 
 首次点击“选择音乐文件夹”时，请授予读写权限。删除操作不会直接永久删除文件，而是将文件移动到音乐目录内的 `.Clair 回收站`。
 
+## 开发与测试
+
+```powershell
+npm test                 # 运行全部测试（库模型、FLAC 元数据、自动补齐工具、服务器冒烟）
+npm run check:syntax     # 对仓库内全部 JS 文件做 node --check 语法检查
+npm start                # 等价于 node server.cjs
+```
+
+GitHub Actions 会在 push / pull request 时，于 Node 20 与 22、Ubuntu 与 Windows 上自动运行语法检查和全部测试。
+
 ## 本地数据
 
 Clair 会在所选音乐目录内创建 `.Clair`：
@@ -61,6 +73,24 @@ Clair 会在所选音乐目录内创建 `.Clair`：
 - `server.cjs`：本地只读静态服务器。
 - `tests/library-model.test.cjs`：音乐库组织、稳定标识和排序测试。
 - `tests/flac-metadata.test.cjs`：FLAC 元数据无损重建测试。
+- `tests/flac-auto-metadata.test.cjs`：自动补齐工具的推断规则与 DeepSeek 校验测试。
+
+## 命令行工具
+
+- `tools/flac-auto-metadata.cjs`：接管新加入音乐库的 FLAC，保守补齐空标签（见下节）。
+- `tools/metadata-audit.cjs`：扫描音乐库（FLAC/MP3），报告缺失标签、非 UTF-8 标签与疑似乱码，可输出 JSON 报告。
+  ```powershell
+  node tools/metadata-audit.cjs "Z:\wc-zh\Music" audit-report.json
+  ```
+- `tools/metadata-repair.cjs`：修复编码损坏、移除下载站广告标签、补充规范日期字段；也内置了针对本库的硬编码修复项（`MANUAL_FIXES`，路径与专辑信息固定，仅适用于匹配的目录）。默认只打印预览，`--apply` 才会写入：
+  ```powershell
+  node tools/metadata-repair.cjs "Z:\wc-zh\Music"          # 仅预览
+  node tools/metadata-repair.cjs "Z:\wc-zh\Music" --apply  # 写入并备份到 .Clair/metadata-repair-*
+  ```
+- `tools/extract-flac-cover.cjs`：提取 FLAC 内嵌封面图。
+  ```powershell
+  node tools/extract-flac-cover.cjs "file.flac" "cover.jpg"
+  ```
 
 ## 自动处理新增 FLAC
 

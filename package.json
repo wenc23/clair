@@ -1,0 +1,16 @@
+{
+  "name": "clair",
+  "version": "3.1.0",
+  "private": true,
+  "description": "Clair — 面向古典音乐收藏的本地 FLAC Web 播放器",
+  "main": "server.cjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.cjs",
+    "test": "node tests/library-model.test.cjs && node tests/flac-metadata.test.cjs && node tests/flac-auto-metadata.test.cjs && node tests/server-smoke.test.cjs",
+    "check:syntax": "node tools/check-syntax.cjs"
+  },
+  "license": "UNLICENSED"
+}

@@ -494,6 +494,10 @@ function applyPlan(filePath, relativePath, plan, manifest) {
 
 function main() {
   if (!fs.statSync(ROOT).isDirectory()) throw new Error(`Not a directory: ${ROOT}`);
+  if (APPLY) {
+    process.stdout.write("⚠ 本脚本包含针对特定音乐库的硬编码修复项（MANUAL_FIXES），\n");
+    process.stdout.write("  仅适用于与之匹配的目录结构与文件路径，写入前请先核对下方预览。\n");
+  }
   const files = walk(ROOT)
     .filter((filePath) => {
       const relative = path.relative(ROOT, filePath).replaceAll("\\", "/");

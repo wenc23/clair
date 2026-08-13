@@ -680,7 +680,8 @@
       const parsed = parseId3(bytes);
       info = finishMp3Info(bytes, parsed, file);
       info.tags ||= normalizeTags({});
-      info.format = file.name.split(".").pop().toUpperCase();
+      const extension = file.name.split(".").pop();
+      info.format = extension && extension !== file.name ? extension.toUpperCase() : "AUDIO";
     }
     if (info.audioMd5) {
       info.signature = `flac:${info.audioMd5}`;
@@ -731,6 +732,12 @@
   function playbackMimeType(file) {
     const extension = file.name.split(".").pop().toLocaleLowerCase();
     return AUDIO_MIME_TYPES[extension] || file.type || "application/octet-stream";
+  }
+
+  function browserPlayable(file) {
+    // Chrome/Edge 的 <audio> 不支持 AIFF；其余格式（FLAC/WAV/MP3/M4A/AAC/Ogg）均可播放。
+    const extension = file.name.split(".").pop().toLocaleLowerCase();
+    return extension !== "aiff" && extension !== "aif";
   }
 
   function isAudioFile(file) {
@@ -1077,9 +1084,15 @@
     try {
       const file = await track.handle.getFile();
       if (requestId !== state.playRequestId) return;
+      if (!browserPlayable(file)) {
+        log("warn", "playback", "当前浏览器不支持此格式播放", `${track.path} · AIFF 请先转换为 FLAC/WAV/MP3`);
+        return;
+      }
       const mimeType = playbackMimeType(file);
-      const playbackBlob = new Blob([file], { type: mimeType });
-      state.audioUrl = URL.createObjectURL(playbackBlob);
+      // 直接引用 File 本身而非 new Blob([file])：后者会把整个文件复制进内存，
+      // 对 Hi-Res FLAC（可达数百 MB）会造成明显的内存峰值与卡顿。
+      const playbackSource = file.type ? file : new Blob([file], { type: mimeType });
+      state.audioUrl = URL.createObjectURL(playbackSource);
       dom.audio.src = state.audioUrl;
       dom.audio.load();
       ensureAudioGraph();
@@ -1796,6 +1809,7 @@
         code: mediaError?.code || 0,
         reason: errorNames[mediaError?.code] || "UNKNOWN",
         message: mediaError?.message || "",
+        hint: mediaError?.code === 4 ? "浏览器不支持该文件的格式/编码（AIFF 不受 Chrome/Edge 支持），可转换后重试" : "",
         path: track?.path || "",
         mimeType: track?.mimeType || "",
         networkState: dom.audio.networkState,

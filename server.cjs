@@ -14,9 +14,31 @@ const contentTypes = {
   ".png": "image/png",
 };
 
+function sendBadRequest(response) {
+  response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" }).end("Bad request");
+}
+
 const server = http.createServer((request, response) => {
-  const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
-  const requestedPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+  let url;
+  try {
+    url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+  } catch {
+    sendBadRequest(response);
+    return;
+  }
+  let requestedPath;
+  try {
+    requestedPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
+  } catch {
+    // 非法的百分号编码（如 /%zz）会导致 decodeURIComponent 抛 URIError，
+    // 若不捕获会让整个服务器进程崩溃。
+    sendBadRequest(response);
+    return;
+  }
+  if (requestedPath.includes("\u0000")) {
+    sendBadRequest(response);
+    return;
+  }
   const filePath = path.resolve(root, `.${requestedPath}`);
   const relativePath = path.relative(root, filePath).replaceAll("\\", "/");
 
@@ -38,6 +60,7 @@ const server = http.createServer((request, response) => {
       contentTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream"
     );
     response.setHeader("Cache-Control", "no-store");
+    response.setHeader("X-Content-Type-Options", "nosniff");
     fs.createReadStream(filePath).pipe(response);
   });
 });
