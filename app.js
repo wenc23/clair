@@ -3,6 +3,21 @@
 
   const $ = (id) => document.getElementById(id);
   const APP_VERSION = "3.1.0";
+  const THEMES = ["nocturne", "ivory", "ocean", "sakura", "forest", "violet", "solar"];
+  const THEME_DETAILS = Object.freeze({
+    nocturne: { chrome: "#101216", visualizer: "bars", description: "暖黑、古董金与唱片沙龙" },
+    ivory: { chrome: "#f3eee3", visualizer: "bars", description: "旧谱纸、靛蓝墨与档案室" },
+    ocean: { chrome: "#06171b", visualizer: "hydrophone", description: "观测窗、声呐环与生物荧光" },
+    sakura: { chrome: "#160f16", visualizer: "sakura", description: "春樱、和纸与枝头月色" },
+    forest: { chrome: "#0b140f", visualizer: "contour", description: "庭园拱门、等高线与雨后苔色" },
+    violet: { chrome: "#090b1a", visualizer: "stellar", description: "古天文图、星轨与切角框架" },
+    solar: { chrome: "#f6f0e3", visualizer: "bars", description: "奶油纸、赤陶与午后斜光" },
+  });
+  const storedTheme = localStorage.getItem("clair-theme");
+  const initialTheme = THEMES.includes(storedTheme) ? storedTheme : "nocturne";
+  const reducedMotion = window.matchMedia
+    ? window.matchMedia("(prefers-reduced-motion: reduce)")
+    : { matches: false };
   const AUDIO_EXTENSIONS = /\.(flac|wav|wave|mp3|m4a|aac|ogg|opus|aiff?)$/i;
   const AUDIO_MIME_TYPES = {
     flac: "audio/flac",
@@ -52,6 +67,8 @@
     tagDialog: $("tag-dialog"),
     soundDialog: $("sound-dialog"),
     healthPanel: $("health-panel"),
+    themeDescription: $("theme-description"),
+    themeMeta: document.querySelector('meta[name="theme-color"]'),
   };
 
   const state = {
@@ -66,7 +83,9 @@
     logs: loadLogs(),
     metadata: loadRecord("clair-metadata"),
     collapsedGroups: loadSet("clair-collapsed-groups"),
-    theme: localStorage.getItem("clair-theme") || "nocturne",
+    theme: initialTheme,
+    libraryMode: "none",
+    remoteLibraryName: "",
     shuffle: false,
     repeat: "all",
     audioContext: null,
@@ -86,6 +105,8 @@
     libraryOrder: [],
     visualLevels: new Float32Array(80),
     visualPeaks: new Float32Array(80),
+    visualHistory: [],
+    visualHistoryTime: 0,
     lastVisualizerError: "",
   };
 
@@ -299,11 +320,8 @@
       .slice(0, 500);
     saveJSON("clair-logs", state.logs);
     renderLogs();
-    if (["nocturne", "ivory", "ocean"].includes(settings.theme)) {
-      state.theme = settings.theme;
-      document.body.dataset.theme = settings.theme;
-      $("theme-select").value = settings.theme;
-      localStorage.setItem("clair-theme", settings.theme);
+    if (THEMES.includes(settings.theme)) {
+      applyTheme(settings.theme, { persist: false, announce: false });
     }
     const savedGroupMode = settings.groupMode === "composer" ? "classical" : settings.groupMode;
     if (["folder", "album", "artist", "classical", "smart", "year"].includes(savedGroupMode)) {
@@ -413,13 +431,20 @@
     if (name === "logs") renderLogs();
   }
 
-  function applyTheme(theme) {
-    state.theme = theme;
-    document.body.dataset.theme = theme;
-    $("theme-select").value = theme;
-    localStorage.setItem("clair-theme", theme);
-    writeLocalSettings();
-    log("debug", "ui", "已切换界面主题", theme);
+  function applyTheme(theme, { persist = true, announce = true } = {}) {
+    const nextTheme = THEMES.includes(theme) ? theme : "nocturne";
+    const details = THEME_DETAILS[nextTheme];
+    state.theme = nextTheme;
+    document.body.dataset.theme = nextTheme;
+    document.body.dataset.visualizer = details.visualizer;
+    $("theme-select").value = nextTheme;
+    if (dom.themeDescription) dom.themeDescription.textContent = details.description;
+    if (dom.themeMeta) dom.themeMeta.setAttribute("content", details.chrome);
+    localStorage.setItem("clair-theme", nextTheme);
+    state.visualHistory = [];
+    state.visualHistoryTime = 0;
+    if (persist) writeLocalSettings();
+    if (announce) log("debug", "ui", "已切换界面主题", `${nextTheme} · ${details.description}`);
   }
 
   function formatDuration(seconds) {
@@ -864,7 +889,89 @@
     log("info", "library", "音乐库载入完成", `${state.tracks.length} 首`);
   }
 
+  function updateLibraryModeUI() {
+    const remote = state.libraryMode === "remote";
+    document.body.classList.toggle("is-remote-library", remote);
+    $("connect-lan-library").textContent = remote ? "\u5df2\u8fde\u63a5\u5c40\u57df\u7f51" : "\u5c40\u57df\u7f51\u66f2\u5e93";
+    $("local-data-state").textContent = remote
+      ? "\u5c40\u57df\u7f51\u6a21\u5f0f\uff1aSamba \u97f3\u4e50\u6587\u4ef6\u4fdd\u6301\u53ea\u8bfb"
+      : state.directory
+        ? `\u672c\u5730\u6570\u636e\uff1a${state.directory.name} / ${DATA_DIRECTORY_NAME}`
+        : "\u672c\u5730\u6570\u636e\uff1a\u8fde\u63a5\u540e\u521b\u5efa .Clair";
+  }
+
+  async function connectRemoteLibrary({ silent = false } = {}) {
+    try {
+      updateSourceState("\u6b63\u5728\u8fde\u63a5\u5c40\u57df\u7f51\u66f2\u5e93\u2026", false);
+      const statusResponse = await fetch("/api/status", { cache: "no-store" });
+      if (!statusResponse.ok) {
+        if (silent && statusResponse.status === 404) {
+          updateSourceState("\u5c1a\u672a\u8fde\u63a5", false);
+          return false;
+        }
+        throw new Error("\u5f53\u524d\u670d\u52a1\u672a\u542f\u7528\u5c40\u57df\u7f51\u66f2\u5e93");
+      }
+      const status = await statusResponse.json();
+      if (!status.configured) throw new Error("\u670d\u52a1\u7aef\u5c1a\u672a\u914d\u7f6e Samba \u97f3\u4e50\u76ee\u5f55");
+      const response = await fetch("/api/library", { cache: "no-store" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || `\u66f2\u5e93\u8bf7\u6c42\u5931\u8d25\uff08HTTP ${response.status}\uff09`);
+      ++state.libraryLoadToken;
+      releaseObjectUrls();
+      clearPlaybackSource();
+      state.selected.clear();
+      state.currentIndex = -1;
+      state.directory = null;
+      state.dataDirectory = null;
+      state.trashMode = false;
+      state.libraryMode = "remote";
+      state.remoteLibraryName = payload.libraryName || status.libraryName || "Samba \u97f3\u4e50\u5e93";
+      state.tracks = (Array.isArray(payload.tracks) ? payload.tracks : []).map((item) => {
+        const tags = {
+          title: item.title || "", artist: item.artist || "", albumArtist: item.albumArtist || "",
+          conductor: item.conductor || "", orchestra: item.orchestra || "", composer: item.composer || "",
+          album: item.album || "", work: item.work || "", year: item.year || "", genre: item.genre || "",
+          trackNumber: item.trackNumber || "", discNumber: item.discNumber || "",
+        };
+        return {
+          ...item,
+          id: "",
+          stableKey: `remote:${item.path}`,
+          signature: `remote:${item.path}`,
+          folder: String(item.path || "").split("/").slice(0, -1).join(" / "),
+          tags,
+          remote: true,
+          coverUrl: "",
+        };
+      });
+      window.ClairLibraryModel.assignStableIds(state.tracks);
+      state.tracks.forEach(applyMetadataOverride);
+      renderLibrary();
+      updateLibraryModeUI();
+      updateSourceState(`${state.remoteLibraryName} \u00b7 ${state.tracks.length} \u9996 \u00b7 \u53ea\u8bfb`, true);
+      dom.navTrackCount.textContent = String(state.tracks.length);
+      $("toggle-trash").textContent = "\u67e5\u770b\u56de\u6536\u7ad9";
+      $("trash-selected").classList.remove("is-hidden");
+      $("restore-selected").classList.add("is-hidden");
+      log("info", "network", "\u5c40\u57df\u7f51\u66f2\u5e93\u5df2\u8fde\u63a5", `${state.remoteLibraryName} \u00b7 ${state.tracks.length} \u9996`);
+      return true;
+    } catch (error) {
+      if (silent) {
+        updateSourceState("\u5c1a\u672a\u8fde\u63a5", false);
+        return false;
+      }
+      updateSourceState("\u5c40\u57df\u7f51\u8fde\u63a5\u5931\u8d25", false);
+      log("error", "network", "\u5c40\u57df\u7f51\u66f2\u5e93\u8fde\u63a5\u5931\u8d25", error.message);
+      window.alert(`\u8fde\u63a5\u5931\u8d25\uff1a${error.message}`);
+      return false;
+    }
+  }
+
   async function refreshLibrary() {
+    if (state.libraryMode === "remote") {
+      await connectRemoteLibrary();
+      return;
+    }
     if (!state.directory) {
       log("warn", "library", "刷新失败：尚未连接音乐文件夹");
       return;
@@ -936,6 +1043,7 @@
       database.close();
       if (handle && await handle.queryPermission({ mode: "readwrite" }) === "granted") {
         state.directory = handle;
+        state.libraryMode = "local";
         await initializeLocalData();
         log("info", "permission", "已恢复音乐文件夹授权", handle.name);
         await refreshLibrary();
@@ -955,6 +1063,8 @@
       const selectedDirectory = await window.showDirectoryPicker({ mode: "readwrite" });
       await state.localWriteQueue;
       state.directory = selectedDirectory;
+      state.libraryMode = "local";
+      updateLibraryModeUI();
       state.dataDirectory = null;
       state.trashMode = false;
       await initializeLocalData();
@@ -1082,8 +1192,23 @@
     renderLibrary();
     clearPlaybackSource({ cancelPending: false });
     try {
-      const file = await track.handle.getFile();
+      const file = track.streamUrl ? null : await track.handle.getFile();
       if (requestId !== state.playRequestId) return;
+      if (track.streamUrl) {
+        if (!browserPlayable({ name: track.fileName, type: track.mimeType || "" })) {
+          log("warn", "playback", "Unsupported remote audio format", track.path);
+          return;
+        }
+        dom.audio.src = track.streamUrl;
+        dom.audio.load();
+        ensureAudioGraph();
+        log("debug", "playback", "LAN audio stream ready", `${track.path} · ${track.mimeType} · ${formatSize(track.fileSize)}`);
+        if (autoplay) {
+          await state.audioContext.resume();
+          await dom.audio.play();
+        }
+        return;
+      }
       if (!browserPlayable(file)) {
         log("warn", "playback", "当前浏览器不支持此格式播放", `${track.path} · AIFF 请先转换为 FLAC/WAV/MP3`);
         return;
@@ -1131,11 +1256,17 @@
     $("transport-artist").textContent = track.artist || track.composer || track.fileName;
     $("mini-cover").innerHTML = track.coverUrl ? `<img src="${track.coverUrl}" alt="" />` : `<span>${escapeHTML((track.title || "C").charAt(0))}</span>`;
     $("favorite-current").textContent = track.favorite ? "♥ 已收藏" : "♡ 收藏";
+    // 封面氛围光：把当前封面作为正在聆听页的模糊背景
+    $("player-view").style.setProperty("--cover-bg", track.coverUrl ? `url("${track.coverUrl}")` : "none");
     $("edit-current-tags").disabled = track.format !== "FLAC";
     $("edit-current-tags").textContent = track.format === "FLAC" ? "编辑 FLAC 元数据" : "仅支持 FLAC 元数据";
     $("audio-format").textContent = track.format || "—";
     $("audio-sample-rate").textContent = formatRate(track.sampleRate);
     $("audio-bit-depth").textContent = track.bits ? `${track.bits} bit` : "—";
+    if (track.remote) {
+      $("edit-current-tags").disabled = true;
+      $("edit-current-tags").textContent = "\u5c40\u57df\u7f51\u6a21\u5f0f\u53ea\u8bfb";
+    }
     $("audio-bitrate").textContent = track.bitrate ? `${Math.round(track.bitrate)} kbps` : "—";
     $("audio-channels").textContent = track.channels === 1 ? "单声道" : track.channels === 2 ? "立体声" : track.channels ? `${track.channels} 声道` : "—";
     $("audio-duration").textContent = formatDuration(track.duration);
@@ -1245,6 +1376,10 @@
     if (track.format !== "FLAC") {
       log("warn", "metadata", "无法写入元数据：当前曲目不是 FLAC", track.fileName);
       window.alert("当前只支持直接写入 FLAC 的 Vorbis Comment 元数据。");
+      return;
+    }
+    if (track.remote) {
+      log("warn", "metadata", "Remote library is read-only", track.path);
       return;
     }
     const fields = ["title", "artist", "conductor", "orchestra", "composer", "album", "work", "year"];
@@ -1379,8 +1514,8 @@
     }
     const checks = {
       version: APP_VERSION,
-      secureContext: window.isSecureContext,
-      directoryPicker: typeof window.showDirectoryPicker === "function",
+      secureContext: state.libraryMode === "remote" || window.isSecureContext,
+      directoryPicker: state.libraryMode === "remote" || typeof window.showDirectoryPicker === "function",
       audioContext: Boolean(window.AudioContext || window.webkitAudioContext),
       resizeObserver: typeof window.ResizeObserver === "function",
       canvas2D,
@@ -1392,9 +1527,13 @@
       tracks: state.tracks.length,
       currentTrack: currentTrack()?.path || "",
       view: document.querySelector("[data-view-panel].is-active")?.dataset.viewPanel || "",
+      libraryMode: state.libraryMode,
+      remoteLibrary: state.remoteLibraryName,
     };
     const requiredFailures = [
       !checks.secureContext && "非安全上下文",
+      false,
+      false,
       !checks.directoryPicker && "缺少文件夹访问 API",
       !checks.audioContext && "缺少 Web Audio API",
       !checks.resizeObserver && "缺少 ResizeObserver",
@@ -1552,7 +1691,7 @@
     const orderedItems = window.ClairLibraryModel.flattenTreeItems(getLibraryTree());
     for (const { track } of orderedItems) {
       lines.push(`#EXTINF:${Math.round(track.duration) || -1},${track.artist || track.composer} - ${track.title}`);
-      lines.push(track.path);
+      lines.push(track.streamUrl ? new URL(track.streamUrl, window.location.href).href : track.path);
     }
     downloadBlob("clair-playlist.m3u", lines.join("\n"), "audio/x-mpegurl;charset=utf-8");
     log("info", "library", "已导出 M3U", `${getFilteredTracks().length} 首`);
@@ -1574,6 +1713,250 @@
     dom.canvas.height = Math.max(1, Math.floor(rect.height * ratio));
   }
 
+  function traceSpectrumCurve(context, values, left, plotWidth, baseline, amplitude, stride = 1) {
+    const points = [];
+    for (let index = 0; index < values.length; index += stride) {
+      points.push([
+        left + index / Math.max(1, values.length - 1) * plotWidth,
+        baseline - values[index] * amplitude,
+      ]);
+    }
+    if (points.length < 2) return points;
+    context.beginPath();
+    context.moveTo(points[0][0], points[0][1]);
+    for (let index = 1; index < points.length - 1; index++) {
+      const current = points[index];
+      const next = points[index + 1];
+      context.quadraticCurveTo(current[0], current[1], (current[0] + next[0]) / 2, (current[1] + next[1]) / 2);
+    }
+    context.lineTo(points.at(-1)[0], points.at(-1)[1]);
+    return points;
+  }
+
+  function drawVisualizerGrid(context, mode, grid, left, right, top, baseline) {
+    context.save();
+    context.strokeStyle = grid;
+    context.lineWidth = 1;
+    const rows = mode === "hydrophone" ? 6 : mode === "sakura" ? 3 : 4;
+    for (let row = 1; row <= rows; row++) {
+      const y = top + (baseline - top) * row / (rows + 1);
+      context.beginPath();
+      context.moveTo(left, y);
+      context.lineTo(right, y);
+      context.stroke();
+    }
+    if (mode === "stellar") {
+      for (let column = 1; column < 8; column++) {
+        const x = left + (right - left) * column / 8;
+        context.beginPath();
+        context.moveTo(x, top);
+        context.lineTo(x, baseline);
+        context.stroke();
+      }
+    } else if (mode === "hydrophone") {
+      context.globalAlpha = 0.7;
+      for (let tick = 0; tick <= 24; tick++) {
+        const x = left + (right - left) * tick / 24;
+        context.beginPath();
+        context.moveTo(x, baseline - (tick % 4 === 0 ? 5 : 2));
+        context.lineTo(x, baseline + 2);
+        context.stroke();
+      }
+    }
+    context.restore();
+  }
+
+  function drawBarSpectrum(context, geometry, colors) {
+    const { left, plotWidth, top, baseline } = geometry;
+    const { accent, fill } = colors;
+    const bars = state.visualLevels.length;
+    const gradient = context.createLinearGradient(0, top, 0, baseline);
+    gradient.addColorStop(0, accent);
+    gradient.addColorStop(1, fill);
+    const envelope = [];
+    for (let index = 0; index < bars; index++) {
+      const slot = plotWidth / bars;
+      const barWidth = Math.max(2, slot - 2);
+      const x = left + index * slot + (slot - barWidth) / 2;
+      const barHeight = Math.max(2, state.visualLevels[index] * (baseline - top) * 0.94);
+      const y = baseline - barHeight;
+      context.globalAlpha = 0.78;
+      context.fillStyle = gradient;
+      context.fillRect(x, y, barWidth, barHeight);
+      context.globalAlpha = 0.95;
+      context.fillStyle = accent;
+      context.fillRect(x, baseline - state.visualPeaks[index] * (baseline - top) * 0.94, barWidth, 1.5);
+      envelope.push([x + barWidth / 2, y]);
+    }
+    context.globalAlpha = 1;
+    context.strokeStyle = accent;
+    context.lineWidth = 1.2;
+    context.beginPath();
+    envelope.forEach(([x, y], index) => index ? context.lineTo(x, y) : context.moveTo(x, y));
+    context.stroke();
+  }
+
+  function drawHydrophoneSpectrum(context, geometry, colors, time) {
+    const { left, plotWidth, top, baseline } = geometry;
+    const { accent, secondary } = colors;
+    if (!state.visualHistory.length || time - state.visualHistoryTime >= 90) {
+      state.visualHistory.unshift(Float32Array.from(state.visualLevels));
+      if (state.visualHistory.length > 12) state.visualHistory.pop();
+      state.visualHistoryTime = time;
+    }
+    const count = state.visualHistory.length;
+    for (let index = count - 1; index >= 0; index--) {
+      const rowBaseline = top + (baseline - top) * (index + 1) / (count + 1);
+      const amplitude = Math.max(9, (baseline - top) / Math.max(5, count) * 1.65);
+      context.strokeStyle = index === 0 ? secondary : accent;
+      context.globalAlpha = index === 0 ? 0.95 : Math.max(0.12, 0.62 - index * 0.035);
+      context.lineWidth = index === 0 ? 1.6 : 1;
+      traceSpectrumCurve(context, state.visualHistory[index], left, plotWidth, rowBaseline, amplitude, 2);
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+  }
+
+  function drawSakuraSpectrum(context, geometry, colors) {
+    const { left, plotWidth, top, baseline } = geometry;
+    const { accent, fill, secondary } = colors;
+    const amplitude = (baseline - top) * 0.72;
+    const primaryPoints = traceSpectrumCurve(context, state.visualLevels, left, plotWidth, baseline, amplitude);
+    if (primaryPoints.length) {
+      context.lineTo(primaryPoints.at(-1)[0], baseline);
+      context.lineTo(primaryPoints[0][0], baseline);
+      context.closePath();
+      context.fillStyle = fill;
+      context.globalAlpha = 0.62;
+      context.fill();
+    }
+    for (let layer = 2; layer >= 0; layer--) {
+      context.strokeStyle = layer === 0 ? accent : secondary;
+      context.globalAlpha = layer === 0 ? 0.94 : 0.18 + layer * 0.1;
+      context.lineWidth = layer === 0 ? 1.7 : 1.1;
+      traceSpectrumCurve(
+        context,
+        state.visualLevels,
+        left,
+        plotWidth,
+        baseline - layer * 5,
+        amplitude * (1 - layer * 0.09),
+        layer + 1
+      );
+      context.stroke();
+    }
+    for (let index = 6; index < state.visualLevels.length; index += 10) {
+      const level = state.visualLevels[index];
+      if (level < 0.14) continue;
+      const x = left + index / (state.visualLevels.length - 1) * plotWidth;
+      const y = baseline - level * amplitude;
+      const petal = 1.5 + level * 2.7;
+      context.save();
+      context.translate(x, y);
+      context.fillStyle = index % 20 === 6 ? accent : secondary;
+      context.globalAlpha = 0.58 + level * 0.32;
+      for (let leaf = 0; leaf < 5; leaf++) {
+        context.save();
+        context.rotate(leaf * Math.PI * 0.4 + index * 0.07);
+        context.beginPath();
+        context.ellipse(0, -petal * 1.15, petal * 0.62, petal * 1.18, 0, 0, Math.PI * 2);
+        context.fill();
+        context.restore();
+      }
+      context.fillStyle = accent;
+      context.globalAlpha = 0.92;
+      context.beginPath();
+      context.arc(0, 0, Math.max(0.8, petal * 0.22), 0, Math.PI * 2);
+      context.fill();
+      context.restore();
+    }
+    context.globalAlpha = 1;
+  }
+
+  function drawContourSpectrum(context, geometry, colors) {
+    const { left, plotWidth, top, baseline } = geometry;
+    const { accent, secondary } = colors;
+    const amplitude = (baseline - top) * 0.5;
+    for (let layer = 5; layer >= 0; layer--) {
+      context.strokeStyle = layer === 0 ? accent : secondary;
+      context.globalAlpha = layer === 0 ? 0.96 : Math.max(0.14, 0.5 - layer * 0.055);
+      context.lineWidth = layer === 0 ? 1.7 : 1;
+      traceSpectrumCurve(
+        context,
+        state.visualLevels,
+        left,
+        plotWidth,
+        baseline - layer * 8,
+        amplitude * (0.7 + layer * 0.045),
+        2
+      );
+      context.stroke();
+    }
+    context.fillStyle = secondary;
+    context.globalAlpha = 0.9;
+    for (let index = 4; index < state.visualLevels.length; index += 8) {
+      if (state.visualLevels[index] < 0.55) continue;
+      const x = left + index / (state.visualLevels.length - 1) * plotWidth;
+      const y = baseline - state.visualLevels[index] * amplitude;
+      context.beginPath();
+      context.arc(x, y, 1.8, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.globalAlpha = 1;
+  }
+
+  function drawStellarSpectrum(context, geometry, colors) {
+    const { left, plotWidth, top, baseline } = geometry;
+    const { accent, secondary } = colors;
+    const amplitude = (baseline - top) * 0.78;
+    const points = [];
+    for (let index = 0; index < state.visualLevels.length; index += 4) {
+      points.push([
+        left + index / (state.visualLevels.length - 1) * plotWidth,
+        baseline - state.visualLevels[index] * amplitude,
+        state.visualLevels[index],
+      ]);
+    }
+    context.strokeStyle = accent;
+    context.globalAlpha = 0.45;
+    context.lineWidth = 0.8;
+    context.beginPath();
+    points.forEach(([x, y], index) => index ? context.lineTo(x, y) : context.moveTo(x, y));
+    context.stroke();
+    context.shadowColor = accent;
+    context.shadowBlur = 7;
+    points.forEach(([x, y, level], index) => {
+      context.fillStyle = level > 0.58 || index % 6 === 0 ? secondary : accent;
+      context.globalAlpha = 0.58 + level * 0.42;
+      context.beginPath();
+      context.arc(x, y, 1.25 + level * 2.7, 0, Math.PI * 2);
+      context.fill();
+    });
+    context.shadowBlur = 0;
+    context.globalAlpha = 1;
+  }
+
+  function drawWaveform(context, geometry, colors, active, time, mode) {
+    const { left, plotWidth, baseline, height } = geometry;
+    const { secondary } = colors;
+    context.strokeStyle = secondary;
+    context.globalAlpha = mode === "stellar" ? 0.52 : 0.7;
+    context.lineWidth = mode === "sakura" ? 1.25 : 1;
+    context.beginPath();
+    const waveY = baseline + (height - baseline) * 0.48;
+    const waveHeight = Math.max(13, (height - baseline) * 0.33);
+    for (let index = 0; index < 220; index++) {
+      const x = left + index / 219 * plotWidth;
+      const sample = active
+        ? (state.waveformData[Math.floor(index / 219 * (state.waveformData.length - 1))] - 128) / 128
+        : Math.sin(index * 0.17 + time / 190) * 0.25 + Math.sin(index * 0.052 - time / 310) * 0.13;
+      const y = waveY + sample * waveHeight;
+      index ? context.lineTo(x, y) : context.moveTo(x, y);
+    }
+    context.stroke();
+    context.globalAlpha = 1;
+  }
+
   function drawVisualizer(time) {
     try {
       const canvas = dom.canvas;
@@ -1585,18 +1968,26 @@
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, width, height);
       const styles = getComputedStyle(document.body);
-      const accent = styles.getPropertyValue("--accent-bright").trim();
-      const fill = styles.getPropertyValue("--viz-fill").trim();
-      const secondary = styles.getPropertyValue("--viz-secondary").trim();
-      const grid = styles.getPropertyValue("--line").trim();
-      const muted = styles.getPropertyValue("--faint").trim();
+      const colors = {
+        accent: styles.getPropertyValue("--accent-bright").trim(),
+        fill: styles.getPropertyValue("--viz-fill").trim(),
+        secondary: styles.getPropertyValue("--viz-secondary").trim(),
+        grid: styles.getPropertyValue("--line").trim(),
+        muted: styles.getPropertyValue("--faint").trim(),
+      };
+      const mode = THEME_DETAILS[state.theme]?.visualizer || "bars";
       const active = Boolean(state.analyser && !dom.audio.paused && state.frequencyData);
+      const motionTime = reducedMotion.matches && !active ? 0 : time;
       const bars = state.visualLevels.length;
-      const left = 6;
-      const right = width - 6;
-      const top = 8;
-      const baseline = height * 0.79;
-      const plotWidth = right - left;
+      const geometry = {
+        width,
+        height,
+        left: 6,
+        right: width - 6,
+        top: 8,
+        baseline: height * 0.79,
+      };
+      geometry.plotWidth = geometry.right - geometry.left;
       const maximumFrequency = Math.min(state.audioContext ? state.audioContext.sampleRate / 2 : 24000, 20000);
       const levels = new Float32Array(bars);
       let average = 0;
@@ -1619,7 +2010,7 @@
           average += levels[index];
         }
       } else {
-        const seconds = time / 1000;
+        const seconds = motionTime / 1000;
         for (let index = 0; index < bars; index++) {
           const envelope = Math.exp(-index / 92);
           const value =
@@ -1632,63 +2023,31 @@
       }
       average /= bars;
 
-      context.strokeStyle = grid;
-      context.lineWidth = 1;
-      for (let row = 1; row <= 4; row++) {
-        const y = top + (baseline - top) * row / 5;
-        context.beginPath();
-        context.moveTo(left, y);
-        context.lineTo(right, y);
-        context.stroke();
-      }
-
-      const barGradient = context.createLinearGradient(0, top, 0, baseline);
-      barGradient.addColorStop(0, accent);
-      barGradient.addColorStop(1, fill);
-      const envelopePoints = [];
+      const speed = active ? 0.38 : reducedMotion.matches ? 1 : 0.12;
       for (let index = 0; index < bars; index++) {
-        const speed = active ? 0.38 : 0.12;
         state.visualLevels[index] += (levels[index] - state.visualLevels[index]) * speed;
         state.visualPeaks[index] = Math.max(state.visualLevels[index], state.visualPeaks[index] - 0.008);
-        const slot = plotWidth / bars;
-        const barWidth = Math.max(2, slot - 2);
-        const x = left + index * slot + (slot - barWidth) / 2;
-        const barHeight = Math.max(2, state.visualLevels[index] * (baseline - top) * 0.94);
-        const y = baseline - barHeight;
-        context.globalAlpha = 0.78;
-        context.fillStyle = barGradient;
-        context.fillRect(x, y, barWidth, barHeight);
-        context.globalAlpha = 0.95;
-        context.fillStyle = accent;
-        context.fillRect(x, baseline - state.visualPeaks[index] * (baseline - top) * 0.94, barWidth, 1.5);
-        envelopePoints.push([x + barWidth / 2, y]);
       }
 
-      context.globalAlpha = 1;
-      context.strokeStyle = accent;
-      context.lineWidth = 1.2;
-      context.beginPath();
-      envelopePoints.forEach(([x, y], index) => index ? context.lineTo(x, y) : context.moveTo(x, y));
-      context.stroke();
+      drawVisualizerGrid(context, mode, colors.grid, geometry.left, geometry.right, geometry.top, geometry.baseline);
+      if (mode === "hydrophone") drawHydrophoneSpectrum(context, geometry, colors, motionTime);
+      else if (mode === "sakura") drawSakuraSpectrum(context, geometry, colors);
+      else if (mode === "contour") drawContourSpectrum(context, geometry, colors);
+      else if (mode === "stellar") drawStellarSpectrum(context, geometry, colors);
+      else drawBarSpectrum(context, geometry, colors);
+      drawWaveform(context, geometry, colors, active, motionTime, mode);
 
-      context.strokeStyle = secondary;
-      context.globalAlpha = 0.7;
-      context.lineWidth = 1;
-      context.beginPath();
-      const waveY = baseline + (height - baseline) * 0.48;
-      const waveHeight = Math.max(13, (height - baseline) * 0.33);
-      for (let index = 0; index < 220; index++) {
-        const x = left + index / 219 * plotWidth;
-        const sample = active
-          ? (state.waveformData[Math.floor(index / 219 * (state.waveformData.length - 1))] - 128) / 128
-          : Math.sin(index * 0.17 + time / 190) * 0.25 + Math.sin(index * 0.052 - time / 310) * 0.13;
-        const y = waveY + sample * waveHeight;
-        index ? context.lineTo(x, y) : context.moveTo(x, y);
-      }
-      context.stroke();
-      context.globalAlpha = 1;
-      $("analyzer-level").textContent = active ? `${(20 * Math.log10(Math.max(average, 0.001))).toFixed(1)} dBFS` : "IDLE MOTION";
-      $("analyzer-level").style.color = active ? accent : muted;
+      const idleLabels = {
+        hydrophone: "PASSIVE LISTENING",
+        sakura: "BLOSSOM STILL",
+        contour: "QUIET TERRAIN",
+        stellar: "STAR CHART",
+        bars: "IDLE MOTION",
+      };
+      $("analyzer-level").textContent = active
+        ? `${(20 * Math.log10(Math.max(average, 0.001))).toFixed(1)} dBFS`
+        : idleLabels[mode];
+      $("analyzer-level").style.color = active ? colors.accent : colors.muted;
     } catch (error) {
       if (error.message !== state.lastVisualizerError) {
         state.lastVisualizerError = error.message;
@@ -1703,6 +2062,7 @@
     document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
     document.querySelectorAll("[data-view-jump]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.viewJump)));
     $("choose-library").addEventListener("click", chooseLibrary);
+    $("connect-lan-library").addEventListener("click", async () => { if (await connectRemoteLibrary()) setView("library"); });
     $("theme-select").addEventListener("change", (event) => applyTheme(event.target.value));
     $("refresh-library").addEventListener("click", refreshLibrary);
     dom.search.addEventListener("input", renderLibrary);
@@ -1773,13 +2133,21 @@
     });
     dom.seek.addEventListener("input", () => {
       if (dom.audio.duration) dom.audio.currentTime = dom.audio.duration * Number(dom.seek.value) / 1000;
+      dom.seek.style.setProperty("--fill", `${Number(dom.seek.value) / 10}%`);
     });
-    dom.volume.addEventListener("input", () => { dom.audio.volume = Number(dom.volume.value); });
+    dom.volume.addEventListener("input", () => {
+      dom.audio.volume = Number(dom.volume.value);
+      dom.volume.style.setProperty("--fill", `${Number(dom.volume.value) * 100}%`);
+    });
     dom.audio.addEventListener("play", () => {
       dom.play.textContent = "Ⅱ";
+      document.body.classList.add("is-playing");
       log("info", "playback", "开始播放", currentTrack()?.title || "");
     });
-    dom.audio.addEventListener("pause", () => { dom.play.textContent = "▶"; });
+    dom.audio.addEventListener("pause", () => {
+      dom.play.textContent = "▶";
+      document.body.classList.remove("is-playing");
+    });
     dom.audio.addEventListener("ended", () => navigate(1));
     dom.audio.addEventListener("loadedmetadata", () => {
       const track = currentTrack();
@@ -1794,6 +2162,7 @@
       dom.currentTime.textContent = formatDuration(dom.audio.currentTime);
       dom.totalTime.textContent = formatDuration(dom.audio.duration);
       dom.seek.value = String(Math.round(dom.audio.currentTime / dom.audio.duration * 1000));
+      dom.seek.style.setProperty("--fill", `${dom.audio.currentTime / dom.audio.duration * 100}%`);
     });
     dom.audio.addEventListener("error", () => {
       if (!dom.audio.hasAttribute("src")) return;
@@ -1839,6 +2208,8 @@
       releaseObjectUrls();
     });
     new ResizeObserver(resizeCanvas).observe(dom.canvas);
+    dom.volume.style.setProperty("--fill", `${Number(dom.volume.value) * 100}%`);
+    dom.seek.style.setProperty("--fill", "0%");
   }
 
   async function boot() {
@@ -1851,6 +2222,8 @@
     renderLogs();
     updateSourceState("尚未连接", false);
     log("info", "system", `Clair ${APP_VERSION} 已启动`, "可视化引擎正在运行");
+    updateLibraryModeUI();
+    if (await connectRemoteLibrary({ silent: true })) return;
     await restoreRememberedDirectory();
   }
 

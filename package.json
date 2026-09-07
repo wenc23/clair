@@ -9,8 +9,10 @@
   },
   "scripts": {
     "start": "node server.cjs",
-    "test": "node tests/library-model.test.cjs && node tests/flac-metadata.test.cjs && node tests/flac-auto-metadata.test.cjs && node tests/server-smoke.test.cjs",
-    "check:syntax": "node tools/check-syntax.cjs"
+    "test": "node tests/library-model.test.cjs && node tests/flac-metadata.test.cjs && node tests/flac-auto-metadata.test.cjs && node tests/server-smoke.test.cjs && node tests/lan-server.test.cjs",
+    "start:lan": "node lan-server.cjs",
+    "check:syntax": "node tools/check-syntax.cjs",
+    "check:themes": "node tools/theme-contrast.cjs"
   },
   "license": "UNLICENSED"
 }

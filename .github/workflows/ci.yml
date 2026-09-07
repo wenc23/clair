@@ -42,6 +42,9 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Theme contrast check
+        run: npm run check:themes
+
       - name: Tools smoke check
         run: node tools/flac-auto-metadata.cjs --help > /dev/null && node tools/metadata-audit.cjs "$PWD" > /dev/null
         if: runner.os == 'Linux'

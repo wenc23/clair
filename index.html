@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#11130f" />
+    <meta name="theme-color" content="#101216" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>Clair — 古典音乐播放器</title>
     <link rel="stylesheet" href="styles.css" />
@@ -24,7 +24,7 @@
 
         <nav class="main-nav" aria-label="主导航">
           <button class="nav-button is-active" data-view="player">
-            <span class="nav-icon">◉</span>
+            <span class="nav-icon eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
             <span>正在聆听</span>
           </button>
           <button class="nav-button" data-view="library">
@@ -56,8 +56,13 @@
           <select id="theme-select">
             <option value="nocturne">夜曲黑</option>
             <option value="ivory">象牙白</option>
-            <option value="ocean">深海蓝</option>
+            <option value="ocean">潮汐舱</option>
+            <option value="sakura">樱花</option>
+            <option value="forest">苔庭</option>
+            <option value="violet">星图室</option>
+            <option value="solar">浮光</option>
           </select>
+          <small id="theme-description" aria-live="polite">暖黑、古董金与唱片沙龙</small>
         </label>
       </aside>
 
@@ -77,11 +82,13 @@
           <section class="view is-active" id="player-view" data-view-panel="player">
             <div class="now-layout">
               <article class="art-panel">
-                <div class="cover-shell" id="cover-shell">
-                  <img id="cover-image" alt="专辑封面" />
-                  <div class="cover-placeholder">
-                    <span id="cover-letter">C</span>
-                    <small>CLAIR EDITION</small>
+                <div class="vinyl" aria-label="专辑唱片与封面">
+                  <div class="cover-shell" id="cover-shell">
+                    <img id="cover-image" alt="专辑封面" />
+                    <div class="cover-placeholder">
+                      <span id="cover-letter">C</span>
+                      <small>CLAIR EDITION</small>
+                    </div>
                   </div>
                 </div>
                 <div class="record-spine">
@@ -112,33 +119,35 @@
               </article>
             </div>
 
-            <article class="spectrum-card">
-              <div class="card-heading">
-                <div>
-                  <p class="section-kicker">REAL-TIME ANALYZER</p>
-                  <h3>对数频谱与波形</h3>
+            <div class="spectrum-band">
+              <article class="spectrum-card">
+                <div class="card-heading">
+                  <div>
+                    <p class="section-kicker">REAL-TIME ANALYZER</p>
+                    <h3>对数频谱与波形</h3>
+                  </div>
+                  <div class="analyzer-state">
+                    <span id="analyzer-level">IDLE</span>
+                    <span id="analyzer-rate">25 Hz — 20 kHz</span>
+                  </div>
                 </div>
-                <div class="analyzer-state">
-                  <span id="analyzer-level">IDLE</span>
-                  <span id="analyzer-rate">25 Hz — 20 kHz</span>
+                <canvas id="visualizer" aria-label="实时音频频谱"></canvas>
+                <div class="spectrum-scale" aria-hidden="true">
+                  <span>25</span><span>60</span><span>125</span><span>250</span>
+                  <span>500</span><span>1k</span><span>2k</span><span>4k</span>
+                  <span>8k</span><span>16k</span>
                 </div>
-              </div>
-              <canvas id="visualizer" aria-label="实时音频频谱"></canvas>
-              <div class="spectrum-scale" aria-hidden="true">
-                <span>25</span><span>60</span><span>125</span><span>250</span>
-                <span>500</span><span>1k</span><span>2k</span><span>4k</span>
-                <span>8k</span><span>16k</span>
-              </div>
-            </article>
+              </article>
 
-            <section class="audio-facts" aria-label="音频技术信息">
-              <div><span>格式</span><strong id="audio-format">—</strong></div>
-              <div><span>采样率</span><strong id="audio-sample-rate">—</strong></div>
-              <div><span>位深</span><strong id="audio-bit-depth">—</strong></div>
-              <div><span>码率</span><strong id="audio-bitrate">—</strong></div>
-              <div><span>声道</span><strong id="audio-channels">—</strong></div>
-              <div><span>时长</span><strong id="audio-duration">—</strong></div>
-            </section>
+              <section class="audio-facts" aria-label="音频技术信息">
+                <div><span>格式</span><strong id="audio-format">—</strong></div>
+                <div><span>采样率</span><strong id="audio-sample-rate">—</strong></div>
+                <div><span>位深</span><strong id="audio-bit-depth">—</strong></div>
+                <div><span>码率</span><strong id="audio-bitrate">—</strong></div>
+                <div><span>声道</span><strong id="audio-channels">—</strong></div>
+                <div><span>时长</span><strong id="audio-duration">—</strong></div>
+              </section>
+            </div>
           </section>
 
           <section class="view" id="library-view" data-view-panel="library">
@@ -168,6 +177,7 @@
                 </select>
               </label>
               <button class="secondary-button" id="refresh-library">刷新</button>
+              <button class="secondary-button" id="connect-lan-library">&#23616;&#22495;&#32593;&#26354;&#24211;</button>
               <button class="secondary-button" id="health-check">音乐库体检</button>
             </div>
 
