@@ -205,9 +205,55 @@ function suspiciousText(value) {
   return /[\uFFFD]|(?:Ã.|Â.|锟斤拷|闁|濞|缁|浣犲ソ)/u.test(value);
 }
 
-function main() {
-  const root = path.resolve(process.argv[2] || ".");
-  const outputPath = process.argv[3] ? path.resolve(process.argv[3]) : null;
+function usage() {
+  return [
+    "用法：node tools/metadata-audit.cjs [选项] <音乐目录> [输出JSON]",
+    "",
+    "递归扫描 <音乐目录> 下的 .flac/.mp3，检查元数据完整性、编码与可疑文本，",
+    "将摘要打印到标准输出；传入 [输出JSON] 时同时写入完整 JSON 报告。",
+    "",
+    "选项：",
+    "  --help, -h            显示本帮助并退出",
+    "  --fail-on-issues      发现任何错误（errors / invalidUtf8 / suspiciousText 大于 0）",
+    "                        时以退出码 1 结束，便于接入 CI",
+  ].join("\n");
+}
+
+function parseCliArguments(argv) {
+  const options = { root: ".", outputPath: null, help: false, failOnIssues: false };
+  const positionals = [];
+  for (const argument of argv.slice(2)) {
+    if (argument === "--help" || argument === "-h") options.help = true;
+    else if (argument === "--fail-on-issues") options.failOnIssues = true;
+    else if (argument.startsWith("-")) {
+      throw new Error(`未知选项：${argument}\n\n${usage()}`);
+    } else {
+      positionals.push(argument);
+    }
+  }
+  if (positionals.length > 2) {
+    throw new Error(`多余参数：${positionals.slice(2).join(" ")}\n\n${usage()}`);
+  }
+  if (positionals[0]) options.root = path.resolve(positionals[0]);
+  if (positionals[1]) options.outputPath = path.resolve(positionals[1]);
+  return options;
+}
+
+function main(argv = process.argv) {
+  let options;
+  try {
+    options = parseCliArguments(argv);
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  if (options.help) {
+    process.stdout.write(`${usage()}\n`);
+    return;
+  }
+  const root = options.root;
+  const outputPath = options.outputPath;
   const files = walk(root).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const records = [];
   for (const filePath of files) {
@@ -266,6 +312,10 @@ function main() {
       invalidUtf8: record.invalidUtf8,
       suspicious: record.suspicious,
     }, null, 2)}\n`);
+  }
+  if (options.failOnIssues
+    && (summary.errors > 0 || summary.invalidUtf8 > 0 || summary.suspiciousText > 0)) {
+    process.exitCode = 1;
   }
 }
 

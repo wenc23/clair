@@ -2,8 +2,8 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#101216" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#150f1a" />
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
@@ -11,7 +11,7 @@
     <title>Clair — 古典音乐播放器</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body data-theme="nocturne">
+  <body data-theme="sakura" data-mode="dark">
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">
@@ -23,16 +23,16 @@
         </div>
 
         <nav class="main-nav" aria-label="主导航">
-          <button class="nav-button is-active" data-view="player">
+          <button class="nav-button is-active" data-view="player" aria-label="正在聆听">
             <span class="nav-icon eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
             <span>正在聆听</span>
           </button>
-          <button class="nav-button" data-view="library">
+          <button class="nav-button" data-view="library" aria-label="音乐库">
             <span class="nav-icon">≡</span>
             <span>音乐库</span>
             <em id="nav-track-count">0</em>
           </button>
-          <button class="nav-button" data-view="logs">
+          <button class="nav-button" data-view="logs" aria-label="运行日志">
             <span class="nav-icon">⌁</span>
             <span>运行日志</span>
             <em id="nav-log-count">0</em>
@@ -51,19 +51,72 @@
           <p class="local-data-state" id="local-data-state">本地数据：连接后创建 .Clair</p>
         </section>
 
-        <label class="theme-field">
-          <span>界面主题</span>
-          <select id="theme-select">
-            <option value="nocturne">夜曲黑</option>
-            <option value="ivory">象牙白</option>
-            <option value="ocean">潮汐舱</option>
-            <option value="sakura">樱花</option>
-            <option value="forest">苔庭</option>
-            <option value="violet">星图室</option>
-            <option value="solar">浮光</option>
-          </select>
-          <small id="theme-description" aria-live="polite">暖黑、古董金与唱片沙龙</small>
-        </label>
+        <section class="theme-panel" aria-label="界面主题与配色">
+          <label class="theme-field">
+            <span>界面主题</span>
+            <select id="theme-select">
+              <optgroup label="纸墨">
+                <option value="sakura">樱花</option>
+              </optgroup>
+              <optgroup label="光带">
+                <option value="aurora">极光</option>
+              </optgroup>
+              <optgroup label="镜面">
+                <option value="chrome">镀铬</option>
+              </optgroup>
+              <optgroup label="水波">
+                <option value="tide">潮汐</option>
+              </optgroup>
+            </select>
+            <small id="theme-description" aria-live="polite">纸墨 · 和纸纤维、漆墨线脚与朱砂印</small>
+          </label>
+
+          <div class="theme-field">
+            <span id="mode-label">明暗模式</span>
+            <div class="mode-switch" role="radiogroup" aria-labelledby="mode-label">
+              <button type="button" role="radio" data-mode-choice="auto" aria-checked="true">跟随系统</button>
+              <button type="button" role="radio" data-mode-choice="light" aria-checked="false">明</button>
+              <button type="button" role="radio" data-mode-choice="dark" aria-checked="false">暗</button>
+            </div>
+          </div>
+
+          <div class="theme-field">
+            <span id="accent-label">强调色</span>
+            <div class="color-field" role="group" aria-labelledby="accent-label">
+              <input id="accent-color" type="color" value="#f2a3b8" aria-label="选择强调色" />
+              <input id="accent-hex" type="text" inputmode="text" spellcheck="false" maxlength="7" value="#f2a3b8" aria-label="强调色十六进制值" />
+              <button type="button" class="text-button" id="accent-reset">默认</button>
+            </div>
+            <div class="swatch-row" id="accent-presets" aria-label="强调色预设">
+              <button type="button" title="绯樱" aria-pressed="false" data-accent-preset="#d6708c" style="--swatch:#d6708c"></button>
+              <button type="button" title="朱砂" aria-pressed="false" data-accent-preset="#c8452f" style="--swatch:#c8452f"></button>
+              <button type="button" title="琥珀" aria-pressed="false" data-accent-preset="#b4761a" style="--swatch:#b4761a"></button>
+              <button type="button" title="苔绿" aria-pressed="false" data-accent-preset="#4f8a3d" style="--swatch:#4f8a3d"></button>
+              <button type="button" title="青碧" aria-pressed="false" data-accent-preset="#0f9a90" style="--swatch:#0f9a90"></button>
+              <button type="button" title="靛蓝" aria-pressed="false" data-accent-preset="#3f66d4" style="--swatch:#3f66d4"></button>
+              <button type="button" title="紫晶" aria-pressed="false" data-accent-preset="#7b53c9" style="--swatch:#7b53c9"></button>
+              <button type="button" title="石墨" aria-pressed="false" data-accent-preset="#5b6472" style="--swatch:#5b6472"></button>
+            </div>
+          </div>
+
+          <div class="theme-field">
+            <span id="base-label">底色</span>
+            <div class="color-field" role="group" aria-labelledby="base-label">
+              <input id="base-color" type="color" value="#150f1a" aria-label="选择底色" />
+              <input id="base-hex" type="text" inputmode="text" spellcheck="false" maxlength="7" value="#150f1a" aria-label="底色十六进制值" />
+              <button type="button" class="text-button" id="base-reset">默认</button>
+            </div>
+            <div class="swatch-row" id="base-presets" aria-label="底色预设">
+              <button type="button" title="夜墨" aria-pressed="false" data-base-preset="#150f1a" style="--swatch:#150f1a"></button>
+              <button type="button" title="靛夜" aria-pressed="false" data-base-preset="#0b1220" style="--swatch:#0b1220"></button>
+              <button type="button" title="深松" aria-pressed="false" data-base-preset="#0c1a16" style="--swatch:#0c1a16"></button>
+              <button type="button" title="暖褐" aria-pressed="false" data-base-preset="#1a1210" style="--swatch:#1a1210"></button>
+              <button type="button" title="雾蓝" aria-pressed="false" data-base-preset="#dfe7f2" style="--swatch:#dfe7f2"></button>
+              <button type="button" title="米纸" aria-pressed="false" data-base-preset="#f2ece0" style="--swatch:#f2ece0"></button>
+            </div>
+            <small id="color-hint" aria-live="polite"></small>
+          </div>
+        </section>
       </aside>
 
       <main class="main-area">
@@ -80,14 +133,30 @@
 
         <div class="view-stack">
           <section class="view is-active" id="player-view" data-view-panel="player">
+            <!-- 满幅封面层：仅樱花（封面英雄式）主题使用，其余主题 display:none。
+                 图片走 --cover-bg（由 app.js 设在 #player-view 上，可继承）。
+                 用 img 而不是 background-image 是为了让 onerror 能隐藏它，
+                 避免无封面时出现碎图图标。 -->
+            <!-- 满幅封面层：仅樱花（封面英雄式）主题使用，其余主题 display:none。
+                 无封面时它不显示，页面回退到主题自己的底纹。 -->
+            <div class="cover-bg" id="cover-bg" aria-hidden="true">
+              <img id="cover-bg-image" alt="" />
+            </div>
             <div class="now-layout">
-              <article class="art-panel">
-                <div class="vinyl" aria-label="专辑唱片与封面">
-                  <div class="cover-shell" id="cover-shell">
-                    <img id="cover-image" alt="专辑封面" />
-                    <div class="cover-placeholder">
-                      <span id="cover-letter">C</span>
-                      <small>CLAIR EDITION</small>
+              <article class="art-panel grain-surface">
+                <!-- 唱片印章留在唱片区内部：非樱花主题靠 .art-panel 的
+                     place-items:center 把它居中，与改动前完全一致；
+                     樱花模式再把 .art-panel 改造成一个撑满封面、且包含块是
+                     .cover-bg 的定位层，于是 absolute + bottom:-438px 就落在
+                     封面左下角（见 styles.css 的 B 方向注释）。 -->
+                <div class="vinyl-stamp" aria-hidden="true">
+                  <div class="vinyl">
+                    <div class="cover-shell" id="cover-shell">
+                      <img id="cover-image" alt="专辑封面" />
+                      <div class="cover-placeholder">
+                        <span id="cover-letter">C</span>
+                        <small>CLAIR EDITION</small>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -311,6 +380,7 @@
 
   <script src="library-model.js"></script>
   <script src="flac-metadata.js"></script>
+  <script src="theme-model.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

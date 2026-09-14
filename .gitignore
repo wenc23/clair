@@ -12,8 +12,11 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
-# Node 依赖（当前无 package.json，预留）
+# Node 依赖
 node_modules/
 
 # 代理工具工作区
 .agents/
+
+# 主题视觉回归截图（本地用无头 Chrome 生成，不入库）
+.preview/

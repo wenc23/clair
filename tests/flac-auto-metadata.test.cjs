@@ -11,6 +11,7 @@ const {
   inferUpdates,
   mergeAiUpdates,
   readSiblingSequence,
+  sanitizeTagValue,
   validateAiSequence,
   titleFromFileName,
   trackNumberFromFileName,
@@ -128,4 +129,11 @@ test("rejects inconsistent Roman-numeral movement ordering from an AI sequence",
   }, 3);
   assert.equal(result.warning, "inconsistent-roman-movement-order");
   assert.deepEqual([...result.tracks.values()].map((tags) => tags.TITLE), [undefined, undefined, undefined]);
+});
+
+test("sanitizes tag values before they enter the Vorbis payload", () => {
+  assert.equal(sanitizeTagValue("A=B"), "A＝B", "裸 = 会破坏 KEY=VALUE 分帧，应替换为全角");
+  assert.equal(sanitizeTagValue("hi\r\nho"), "hi ho", "控制字符/换行应被清理");
+  assert.equal(sanitizeTagValue("x".repeat(600)).length, 500, "超长值应截断");
+  assert.equal(sanitizeTagValue("  前后  空白  "), "前后 空白", "连续空白应折叠、首尾应去除");
 });

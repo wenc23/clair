@@ -8,7 +8,7 @@ const appRoot = path.resolve(__dirname);
 const musicRoot = path.resolve(process.argv[2] || process.env.CLAIR_MUSIC_DIR || "");
 const port = Number(process.env.CLAIR_PORT) || 8000;
 const host = process.env.CLAIR_HOST || "0.0.0.0";
-const publicFiles = new Set(["index.html", "styles.css", "app.js", "flac-metadata.js", "library-model.js"]);
+const publicFiles = new Set(["index.html", "styles.css", "app.js", "flac-metadata.js", "library-model.js", "theme-model.js"]);
 const audioExtensions = new Set([".flac", ".wav", ".wave", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".aif", ".aiff"]);
 const contentTypes = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -115,8 +115,18 @@ async function serveMedia(request, response, relativePath) {
   const range = request.headers.range;
   if (!range) {
     response.writeHead(200, { ...headers, "Content-Length": total });
-    if (request.method === "HEAD") response.end();
-    else fs.createReadStream(filePath).pipe(response);
+    if (request.method === "HEAD") {
+      response.end();
+      return;
+    }
+    // 文件可能在 stat 与 open 之间消失（Samba 挂载目录），捕获流的 error 以免进程崩溃
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", () => {
+      if (!response.headersSent) response.writeHead(404).end("Not found");
+      else response.destroy();
+    });
+    response.on("close", () => stream.destroy());
+    stream.pipe(response);
     return;
   }
   const match = /^bytes=(\d*)-(\d*)$/.exec(range);
@@ -136,8 +146,18 @@ async function serveMedia(request, response, relativePath) {
   }
   end = Math.min(end, total - 1);
   response.writeHead(206, { ...headers, "Content-Length": end - start + 1, "Content-Range": `bytes ${start}-${end}/${total}` });
-  if (request.method === "HEAD") response.end();
-  else fs.createReadStream(filePath, { start, end }).pipe(response);
+  if (request.method === "HEAD") {
+    response.end();
+    return;
+  }
+  // 分段读取同样要防 stat 与 open 之间文件消失导致的崩溃
+  const stream = fs.createReadStream(filePath, { start, end });
+  stream.on("error", () => {
+    if (!response.headersSent) response.writeHead(404).end("Not found");
+    else response.destroy();
+  });
+  response.on("close", () => stream.destroy());
+  stream.pipe(response);
 }
 
 const server = http.createServer(async (request, response) => {
@@ -185,7 +205,14 @@ const server = http.createServer(async (request, response) => {
     }
     response.setHeader("Content-Type", contentTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream");
     response.setHeader("Cache-Control", "no-store");
-    fs.createReadStream(filePath).pipe(response);
+    // 静态文件同样可能在 stat 与 open 之间消失，捕获流的 error 以免进程崩溃
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", () => {
+      if (!response.headersSent) response.writeHead(404).end("Not found");
+      else response.destroy();
+    });
+    response.on("close", () => stream.destroy());
+    stream.pipe(response);
   });
 });
 

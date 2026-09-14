@@ -2,22 +2,74 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
-  const APP_VERSION = "3.1.0";
-  const THEMES = ["nocturne", "ivory", "ocean", "sakura", "forest", "violet", "solar"];
+  const APP_VERSION = "3.2.0";
+  // 配色派生（自选强调色 / 底色的对比度兜底）在 theme-model.js，先于本文件加载。
+  const THEME_MODEL = window.ClairThemeModel || null;
+  // 主题按"生成机制家族"分为四类，每类保留一套；每套都有明 / 暗两种模式。
+  // 每套主题一个独有的"生成机制"，见 styles.css 的 --mechanism。
+  // 这里不重复声明机制，只用它选频谱画法，保证"不同主题不同观感"。
+  const THEMES = ["sakura", "aurora", "chrome", "tide"];
+  const THEME_GROUPS = Object.freeze([
+    Object.freeze({ label: "纸墨", themes: Object.freeze(["sakura"]) }),
+    Object.freeze({ label: "光带", themes: Object.freeze(["aurora"]) }),
+    Object.freeze({ label: "镜面", themes: Object.freeze(["chrome"]) }),
+    Object.freeze({ label: "水波", themes: Object.freeze(["tide"]) }),
+  ]);
   const THEME_DETAILS = Object.freeze({
-    nocturne: { chrome: "#101216", visualizer: "bars", description: "暖黑、古董金与唱片沙龙" },
-    ivory: { chrome: "#f3eee3", visualizer: "bars", description: "旧谱纸、靛蓝墨与档案室" },
-    ocean: { chrome: "#06171b", visualizer: "hydrophone", description: "观测窗、声呐环与生物荧光" },
-    sakura: { chrome: "#160f16", visualizer: "sakura", description: "春樱、和纸与枝头月色" },
-    forest: { chrome: "#0b140f", visualizer: "contour", description: "庭园拱门、等高线与雨后苔色" },
-    violet: { chrome: "#090b1a", visualizer: "stellar", description: "古天文图、星轨与切角框架" },
-    solar: { chrome: "#f6f0e3", visualizer: "bars", description: "奶油纸、赤陶与午后斜光" },
+    sakura: { name: "樱花", category: "纸墨", visualizer: "sakura", description: "纸墨 · 和纸纤维、漆墨线脚与朱砂印" },
+    aurora: { name: "极光", category: "光带", visualizer: "aura", description: "光带 · 竖向光幕带缓慢横向漂移" },
+    chrome: { name: "镀铬", category: "镜面", visualizer: "metal", description: "镜面 · 拉丝镜面、高光条与亮边斜面" },
+    tide: { name: "潮汐", category: "水波", visualizer: "hydrophone", description: "水波 · 折射焦散网纹与垂直光柱" },
   });
-  const storedTheme = localStorage.getItem("clair-theme");
-  const initialTheme = THEMES.includes(storedTheme) ? storedTheme : "nocturne";
+  // 分类合并后删除的三套主题 → 保留主题。旧深链（?theme=bloom）、旧
+  // localStorage 与旧 settings.json 都能靠它平滑落到新阵容，不至于失效。
+  const LEGACY_THEME_ALIASES = Object.freeze({ bloom: "sakura", ember: "aurora", mono: "chrome" });
+  const MODE_CHOICES = THEME_MODEL ? THEME_MODEL.MODE_CHOICES : ["auto", "light", "dark"];
+  const THEME_STORAGE_KEY = "clair-theme";
+  const MODE_STORAGE_KEY = "clair-theme-mode";
+  const ACCENT_STORAGE_KEY = "clair-accent";
+  const BASE_STORAGE_KEY = "clair-base";
+  // 主题来源优先级：URL 的 ?theme= 深链 > 上次选择 > 旧名归并 > 默认。
+  // 深链便于分享某个主题，也让无头截图/回归截图可以逐主题渲染。
+  const requestedTheme = new URLSearchParams(location.search).get("theme");
+  const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+  const initialTheme = THEMES.includes(requestedTheme)
+    ? requestedTheme
+    : THEMES.includes(LEGACY_THEME_ALIASES[requestedTheme])
+      // 旧深链（?theme=bloom）优先于"上次选择"，否则分享出去的链接会被
+      // 本机存档盖掉，指向另一个主题。
+      ? LEGACY_THEME_ALIASES[requestedTheme]
+      : THEMES.includes(storedTheme)
+        ? storedTheme
+        : THEMES.includes(LEGACY_THEME_ALIASES[storedTheme])
+          ? LEGACY_THEME_ALIASES[storedTheme]
+          // 兜底必须是主题清单里的真实成员：写死主题名的话，
+          // 一旦主题阵容调整，这里会指向已不存在的主题，
+          // THEME_DETAILS 取不到值 → 启动流程抛错 → 事件监听全部绑不上。
+          : THEMES[0];
+  // 明暗：mode 是"用户选择"（auto / light / dark），data-mode 上只落 light|dark。
+  const requestedMode = new URLSearchParams(location.search).get("mode");
+  const storedMode = localStorage.getItem(MODE_STORAGE_KEY);
+  const initialModeChoice = MODE_CHOICES.includes(requestedMode)
+    ? requestedMode
+    : MODE_CHOICES.includes(storedMode)
+      ? storedMode
+      : "auto";
+  // 自选配色：深链 > 上次选择；null 表示"跟随主题作者值"。
+  const requestedAccent = new URLSearchParams(location.search).get("accent");
+  const requestedBase = new URLSearchParams(location.search).get("base");
+  const initialAccent = THEME_MODEL
+    ? THEME_MODEL.normalizeHex(requestedAccent) || THEME_MODEL.normalizeHex(localStorage.getItem(ACCENT_STORAGE_KEY))
+    : null;
+  const initialBase = THEME_MODEL
+    ? THEME_MODEL.normalizeHex(requestedBase) || THEME_MODEL.normalizeHex(localStorage.getItem(BASE_STORAGE_KEY))
+    : null;
   const reducedMotion = window.matchMedia
     ? window.matchMedia("(prefers-reduced-motion: reduce)")
     : { matches: false };
+  const systemPrefersDark = window.matchMedia
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : { matches: true, addEventListener: null };
   const AUDIO_EXTENSIONS = /\.(flac|wav|wave|mp3|m4a|aac|ogg|opus|aiff?)$/i;
   const AUDIO_MIME_TYPES = {
     flac: "audio/flac",
@@ -37,6 +89,25 @@
   const LIBRARY_INDEX_FILE_NAME = "library.json";
   const SETTINGS_FILE_NAME = "settings.json";
   const METADATA_BACKUP_DIRECTORY_NAME = "metadata-backups";
+  // 标签编辑/写入共用同一字段清单，避免多份手工列表漂移
+  const TAG_FIELDS = ["title", "artist", "conductor", "orchestra", "composer", "album", "work", "year"];
+
+  // 日志持久化去抖：内存/localStorage 与本地日志文件分别合并写入，
+  // 避免每条日志都做整表 JSON.stringify + 打开/关闭文件。
+  const LOG_MEMORY_FLUSH_MS = 400;
+  const LOG_FILE_FLUSH_MS = 1200;
+  let logMemoryTimer = 0;
+  let logFileTimer = 0;
+  let pendingFileLogs = [];
+  let logsViewDirty = false;
+  let logsRenderQueued = false;
+
+  // 可视化颜色只随主题变化，按主题缓存，避免每帧 getComputedStyle
+  let visualThemeColors = null;
+  let visualThemeMode = "";
+  let lastAnalyzerLabel = "";
+  let lastAnalyzerLabelColor = "";
+  let searchRenderTimer = 0;
 
   const dom = {
     audio: $("audio"),
@@ -69,6 +140,14 @@
     healthPanel: $("health-panel"),
     themeDescription: $("theme-description"),
     themeMeta: document.querySelector('meta[name="theme-color"]'),
+    modeButtons: document.querySelectorAll("[data-mode-choice]"),
+    accentColor: $("accent-color"),
+    accentHex: $("accent-hex"),
+    accentReset: $("accent-reset"),
+    baseColor: $("base-color"),
+    baseHex: $("base-hex"),
+    baseReset: $("base-reset"),
+    colorHint: $("color-hint"),
   };
 
   const state = {
@@ -84,6 +163,12 @@
     metadata: loadRecord("clair-metadata"),
     collapsedGroups: loadSet("clair-collapsed-groups"),
     theme: initialTheme,
+    themeMode: initialModeChoice,
+    mode: THEME_MODEL
+      ? THEME_MODEL.resolveMode(initialModeChoice, systemPrefersDark.matches)
+      : initialModeChoice === "light" ? "light" : "dark",
+    accent: initialAccent,
+    base: initialBase,
     libraryMode: "none",
     remoteLibraryName: "",
     shuffle: false,
@@ -101,7 +186,6 @@
     audioUrl: "",
     playRequestId: 0,
     libraryLoadToken: 0,
-    refreshToken: 0,
     libraryOrder: [],
     visualLevels: new Float32Array(80),
     visualPeaks: new Float32Array(80),
@@ -157,12 +241,90 @@
     };
     state.logs.unshift(entry);
     state.logs = state.logs.slice(0, 500);
-    saveJSON("clair-logs", state.logs);
     const consoleMethod = level === "error" ? "error" : level === "warn" ? "warn" : level === "debug" ? "debug" : "info";
     console[consoleMethod](`[Clair][${category}] ${message}${entry.details ? ` · ${entry.details}` : ""}`);
-    renderLogs();
-    if (persistLocal) appendLocalLog(entry);
+    scheduleLogPersistence();
+    if (persistLocal && state.dataDirectory) pendingFileLogs.push(entry);
+    requestLogsRender();
+    syncLogBadge();
     return entry;
+  }
+
+  // 日志渲染与持久化都做合并/节流：渲染只发生在日志页可见时，
+  // localStorage 与磁盘写入分别去抖到一次 trailing write。
+  function scheduleLogPersistence() {
+    if (!logMemoryTimer) {
+      logMemoryTimer = setTimeout(() => {
+        logMemoryTimer = 0;
+        saveJSON("clair-logs", state.logs);
+      }, LOG_MEMORY_FLUSH_MS);
+    }
+    if (pendingFileLogs.length && !logFileTimer) {
+      logFileTimer = setTimeout(flushPendingFileLogs, LOG_FILE_FLUSH_MS);
+    }
+  }
+
+  function requestLogsRender() {
+    logsViewDirty = true;
+    const logsView = $("logs-view");
+    if (logsRenderQueued || !logsView || !logsView.classList.contains("is-active")) return;
+    logsRenderQueued = true;
+    requestAnimationFrame(() => {
+      logsRenderQueued = false;
+      if (!logsViewDirty) return;
+      logsViewDirty = false;
+      renderLogs();
+    });
+  }
+
+  function syncLogBadge() {
+    const count = state.logs.filter((entry) => entry.level === "error").length;
+    const text = String(count);
+    if (dom.navLogCount.textContent !== text) dom.navLogCount.textContent = text;
+  }
+
+  // 单一日志行格式：所有落盘/导出/解析共享，避免多处手工拼接漂移
+  function logLineText(entry) {
+    const message = String(entry.message).replace(/\r?\n/g, "\\n");
+    const details = String(entry.details || "").replace(/\r?\n/g, "\\n");
+    return `[${entry.time}] ${String(entry.level).toUpperCase()} ${entry.category}: ${message}${details ? ` | ${details}` : ""}\r\n`;
+  }
+
+  function parseLogLine(line) {
+    const match = /^\[([^\]]+)\] (DEBUG|INFO|WARN|ERROR) ([^:]+): (.*)$/.exec(line);
+    if (!match) return null;
+    const divider = match[4].indexOf(" | ");
+    return {
+      time: match[1],
+      level: match[2].toLowerCase(),
+      category: match[3],
+      message: divider >= 0 ? match[4].slice(0, divider) : match[4],
+      details: divider >= 0 ? match[4].slice(divider + 3) : "",
+    };
+  }
+
+  async function flushPendingFileLogs() {
+    logFileTimer = 0;
+    if (!pendingFileLogs.length) return;
+    const entries = pendingFileLogs.splice(0, pendingFileLogs.length);
+    if (!state.dataDirectory) return;
+    const lines = entries.map(logLineText);
+    enqueueLocalWrite(async (directory) => {
+      const handle = await directory.getFileHandle(LOG_FILE_NAME, { create: true });
+      const file = await handle.getFile();
+      const writer = await handle.createWritable({ keepExistingData: true });
+      if (file.size > 5 * 1024 * 1024) {
+        const tail = await file.slice(Math.max(0, file.size - 1024 * 1024)).text();
+        const rotated = `[${new Date().toISOString()}] INFO system: 日志已自动轮转\r\n${tail}${lines.join("")}`;
+        await writer.seek(0);
+        await writer.write(rotated);
+        await writer.truncate(new TextEncoder().encode(rotated).length);
+      } else {
+        await writer.seek(file.size);
+        await writer.write(lines.join(""));
+      }
+      await writer.close();
+    }, "无法写入本地日志文件");
   }
 
   function enqueueLocalWrite(task, failureMessage) {
@@ -172,33 +334,6 @@
       .then(() => task(directory))
       .catch((error) => log("error", "local-storage", failureMessage, error.message, false));
     return state.localWriteQueue;
-  }
-
-  function formatLogLine(entry) {
-    const message = String(entry.message).replace(/\r?\n/g, "\\n");
-    const details = String(entry.details || "").replace(/\r?\n/g, "\\n");
-    return `[${entry.time}] ${entry.level.toUpperCase()} ${entry.category}: ${message}${details ? ` | ${details}` : ""}\r\n`;
-  }
-
-  function appendLocalLog(entry) {
-    if (!state.dataDirectory) return;
-    const line = formatLogLine(entry);
-    enqueueLocalWrite(async (directory) => {
-      const handle = await directory.getFileHandle(LOG_FILE_NAME, { create: true });
-      const file = await handle.getFile();
-      const writer = await handle.createWritable({ keepExistingData: true });
-      if (file.size > 5 * 1024 * 1024) {
-        const tail = await file.slice(Math.max(0, file.size - 1024 * 1024)).text();
-        const rotated = `[${new Date().toISOString()}] INFO system: 日志已自动轮转\r\n${tail}${line}`;
-        await writer.seek(0);
-        await writer.write(rotated);
-        await writer.truncate(new TextEncoder().encode(rotated).length);
-      } else {
-        await writer.seek(file.size);
-        await writer.write(line);
-      }
-      await writer.close();
-    }, "无法写入本地日志文件");
   }
 
   async function readLocalJson(name, fallback) {
@@ -228,7 +363,7 @@
       if (error.name !== "NotFoundError") throw error;
       const handle = await state.dataDirectory.getFileHandle(LOG_FILE_NAME, { create: true });
       const writer = await handle.createWritable();
-      const initialLines = state.logs.slice().reverse().map(formatLogLine).join("");
+      const initialLines = state.logs.slice().reverse().map(logLineText).join("");
       await writer.write(initialLines);
       await writer.close();
     }
@@ -240,17 +375,9 @@
     const text = await file.slice(Math.max(0, file.size - 2 * 1024 * 1024)).text();
     const entries = [];
     for (const [index, line] of text.split(/\r?\n/).entries()) {
-      const match = line.match(/^\[([^\]]+)\] (DEBUG|INFO|WARN|ERROR) ([^:]+): (.*)$/);
-      if (!match) continue;
-      const divider = match[4].indexOf(" | ");
-      entries.push({
-        id: `local-${match[1]}-${index}`,
-        time: match[1],
-        level: match[2].toLowerCase(),
-        category: match[3],
-        message: divider >= 0 ? match[4].slice(0, divider) : match[4],
-        details: divider >= 0 ? match[4].slice(divider + 3) : "",
-      });
+      const parsed = parseLogLine(line);
+      if (!parsed) continue;
+      entries.push({ id: `local-${parsed.time}-${index}`, ...parsed });
     }
     return entries.reverse();
   }
@@ -258,12 +385,14 @@
   function writeLocalSettings() {
     if (!state.dataDirectory) return;
     const snapshot = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       updatedAt: new Date().toISOString(),
       theme: state.theme,
+      themeMode: state.themeMode,
+      accent: state.accent || "",
+      base: state.base || "",
       groupMode: dom.groupMode.value,
       sortMode: dom.sortMode.value,
-      collapsedGroups: [...state.collapsedGroups],
     };
     enqueueLocalWrite((directory) => writeLocalJsonNow(directory, SETTINGS_FILE_NAME, snapshot), "无法保存本地设置");
   }
@@ -322,23 +451,32 @@
     renderLogs();
     if (THEMES.includes(settings.theme)) {
       applyTheme(settings.theme, { persist: false, announce: false });
+    } else if (THEMES.includes(LEGACY_THEME_ALIASES[settings.theme])) {
+      // 旧存档里的 bloom / ember / mono：归并到同类保留主题
+      applyTheme(LEGACY_THEME_ALIASES[settings.theme], { persist: false, announce: false });
     }
+    // 设置文件是"随音乐目录走"的权威：字段存在就采纳（空串 = 已恢复默认）
+    if (MODE_CHOICES.includes(settings.themeMode)) {
+      applyMode(settings.themeMode, { persist: false, announce: false });
+    }
+    const settingsAccent = typeof settings.accent === "string" ? THEME_MODEL?.normalizeHex(settings.accent) : undefined;
+    const settingsBase = typeof settings.base === "string" ? THEME_MODEL?.normalizeHex(settings.base) : undefined;
+    if (settingsAccent !== undefined) state.accent = settingsAccent;
+    if (settingsBase !== undefined) state.base = settingsBase;
+    if (settingsAccent !== undefined || settingsBase !== undefined) applyCustomColors();
     const savedGroupMode = settings.groupMode === "composer" ? "classical" : settings.groupMode;
     if (["folder", "album", "artist", "classical", "smart", "year"].includes(savedGroupMode)) {
       dom.groupMode.value = savedGroupMode;
     }
     if (["path", "title", "artist", "year"].includes(settings.sortMode)) dom.sortMode.value = settings.sortMode;
-    if (Array.isArray(settings.collapsedGroups)) {
-      state.collapsedGroups = new Set(settings.collapsedGroups);
-      saveJSON("clair-collapsed-groups", settings.collapsedGroups);
-    }
     if (Array.isArray(index.tracks)) {
       for (const item of index.tracks) {
         if (!item?.path) continue;
-        state.metadata[item.path] = {
-          ...(state.metadata[item.path] || {}),
-          favorite: Boolean(item.favorite),
-        };
+        // localStorage 是收藏状态的实时权威（可跨文件夹/LAN 存活）；
+        // 文件索引只在本地无该曲目记录时才补充，避免旧文件覆盖新操作。
+        if (!(item.path in state.metadata)) {
+          state.metadata[item.path] = { favorite: Boolean(item.favorite) };
+        }
       }
     }
     state.localIndex = index;
@@ -377,6 +515,7 @@
 
   function renderLogs() {
     if (!dom.logList) return;
+    logsViewDirty = false;
     const level = dom.logLevel?.value || "all";
     const rows = state.logs.filter((entry) => level === "all" || entry.level === level);
     dom.logList.innerHTML = rows.length
@@ -389,7 +528,7 @@
           </div>`).join("")
       : `<div class="empty-state">暂无符合条件的日志</div>`;
     dom.logSummary.textContent = `${rows.length} / ${state.logs.length} 条`;
-    dom.navLogCount.textContent = String(state.logs.filter((entry) => entry.level === "error").length);
+    syncLogBadge();
   }
 
   function formatLogTime(iso) {
@@ -399,10 +538,8 @@
   }
 
   function exportLogs() {
-    const lines = state.logs.slice().reverse().map((entry) =>
-      `[${entry.time}] ${entry.level.toUpperCase()} ${entry.category}: ${entry.message}${entry.details ? ` | ${entry.details}` : ""}`
-    );
-    downloadBlob("clair-log.txt", lines.join("\n"), "text/plain;charset=utf-8");
+    const text = state.logs.slice().reverse().map((entry) => logLineText(entry).trimEnd()).join("\n");
+    downloadBlob("clair-log.txt", text, "text/plain;charset=utf-8");
     log("info", "log", "已导出运行日志");
   }
 
@@ -431,20 +568,169 @@
     if (name === "logs") renderLogs();
   }
 
+  // 按当前主题缓存可视化颜色与频谱模式（仅主题切换时刷新一次）
+  function refreshVisualThemeCache() {
+    const styles = getComputedStyle(document.body);
+    visualThemeColors = {
+      accent: styles.getPropertyValue("--accent-bright").trim() || "#9fb4ff",
+      fill: styles.getPropertyValue("--viz-fill").trim() || "#c9a56a",
+      secondary: styles.getPropertyValue("--viz-secondary").trim() || "#5a6b7c",
+      grid: styles.getPropertyValue("--line").trim() || "#2a2f3a",
+      muted: styles.getPropertyValue("--faint").trim() || "#8a94a6",
+      // 金属高光与热浪需要"文字色"做高光、强调色做基色
+      text: styles.getPropertyValue("--text").trim() || "#ffffff",
+      base: styles.getPropertyValue("--accent").trim() || "#9fb4ff",
+    };
+    visualThemeMode = THEME_DETAILS[state.theme]?.visualizer || "bars";
+    lastAnalyzerLabel = "";
+    lastAnalyzerLabelColor = "";
+  }
+
   function applyTheme(theme, { persist = true, announce = true } = {}) {
-    const nextTheme = THEMES.includes(theme) ? theme : "nocturne";
+    // 兜底同样必须取自清单，不能写死主题名（写死会在主题阵容调整后崩启动）
+    const nextTheme = THEMES.includes(theme) ? theme : THEMES[0];
     const details = THEME_DETAILS[nextTheme];
     state.theme = nextTheme;
     document.body.dataset.theme = nextTheme;
     document.body.dataset.visualizer = details.visualizer;
     $("theme-select").value = nextTheme;
     if (dom.themeDescription) dom.themeDescription.textContent = details.description;
-    if (dom.themeMeta) dom.themeMeta.setAttribute("content", details.chrome);
-    localStorage.setItem("clair-theme", nextTheme);
+    localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+    refreshVisualThemeCache();
+    state.visualHistory = [];
+    state.visualHistoryTime = 0;
+    // 底色/强调色的派生依赖"当前主题 + 当前模式"的基准色，换主题后要重算
+    applyCustomColors();
+    if (persist) writeLocalSettings();
+    if (announce) log("debug", "ui", "已切换界面主题", `${nextTheme} · ${details.description}`);
+  }
+
+  /* ---------- 明暗模式 ---------- */
+
+  function applyMode(choice, { persist = true, announce = true } = {}) {
+    const nextChoice = MODE_CHOICES.includes(choice) ? choice : "auto";
+    const resolved = THEME_MODEL
+      ? THEME_MODEL.resolveMode(nextChoice, Boolean(systemPrefersDark.matches))
+      : nextChoice === "light" ? "light" : "dark";
+    state.themeMode = nextChoice;
+    state.mode = resolved;
+    document.body.dataset.mode = resolved;
+    dom.modeButtons.forEach((button) => {
+      button.setAttribute("aria-checked", String(button.dataset.modeChoice === nextChoice));
+    });
+    localStorage.setItem(MODE_STORAGE_KEY, nextChoice);
+    // 亮色的对比度目标与暗色不同，配色覆盖必须跟着重算
+    applyCustomColors();
+    refreshVisualThemeCache();
     state.visualHistory = [];
     state.visualHistoryTime = 0;
     if (persist) writeLocalSettings();
-    if (announce) log("debug", "ui", "已切换界面主题", `${nextTheme} · ${details.description}`);
+    if (announce) {
+      log("debug", "ui", "已切换明暗模式", nextChoice === "auto" ? `跟随系统 → ${resolved}` : resolved);
+    }
+  }
+
+  /* ---------- 自选强调色 / 底色 ---------- */
+
+  // 只读取对比度基准需要的两项；读取前必须保证没有本模块写入的内联覆盖。
+  function readBasePalette() {
+    const styles = getComputedStyle(document.body);
+    return {
+      bg: styles.getPropertyValue("--bg").trim(),
+      surface: styles.getPropertyValue("--surface").trim(),
+    };
+  }
+
+  function clearCustomColorTokens() {
+    if (!THEME_MODEL) return;
+    for (const token of Object.values(THEME_MODEL.PALETTE_TOKENS)) {
+      document.body.style.removeProperty(token);
+    }
+    ["--accent", "--accent-bright", "--accent-deep", "--grad-1", "--grad-3"].forEach((token) => {
+      document.body.style.removeProperty(token);
+    });
+  }
+
+  // 用户自选的配色以行内自定义属性落在 body 上：内联样式优先级最高，
+  // 且 --glow / --accent-soft / --viz-fill / --line 等派生令牌会在
+  // 主题块里按新的 --accent / --text 重新解析，自动跟随。
+  function applyCustomColors() {
+    clearCustomColorTokens();
+    if (!THEME_MODEL || (!state.accent && !state.base)) {
+      updateColorInputs();
+      syncThemeColor();
+      return;
+    }
+    const result = THEME_MODEL.buildOverrides({
+      accent: state.accent,
+      base: state.base,
+      mode: state.mode,
+      current: readBasePalette(),
+    });
+    for (const [token, value] of Object.entries(result.tokens)) {
+      document.body.style.setProperty(token, value);
+    }
+    const message = result.warnings.length
+      ? result.warnings.map((warning) => warning.message).join("；")
+      : "";
+    if (dom.colorHint) {
+      dom.colorHint.textContent = message || describeCustomColors();
+    }
+    if (message) log("warn", "ui", "自选配色未能完全应用", message);
+    updateColorInputs();
+    syncThemeColor();
+  }
+
+  function describeCustomColors() {
+    const parts = [];
+    if (state.accent) parts.push(`强调色 ${state.accent}`);
+    if (state.base) parts.push(`底色 ${state.base}`);
+    return parts.length ? `已自定义：${parts.join(" · ")}（已按当前模式校正对比度）` : "";
+  }
+
+  // theme-color 决定浏览器 UI / 首帧底色，必须跟当前实际底色一致。
+  function syncThemeColor() {
+    if (!dom.themeMeta) return;
+    const bg = getComputedStyle(document.body).getPropertyValue("--bg").trim();
+    if (bg) dom.themeMeta.setAttribute("content", bg);
+  }
+
+  function updateColorInputs() {
+    const styles = getComputedStyle(document.body);
+    const accentValue = state.accent || styles.getPropertyValue("--accent").trim() || "#000000";
+    const baseValue = state.base || styles.getPropertyValue("--bg").trim() || "#000000";
+    if (dom.accentColor) dom.accentColor.value = accentValue;
+    if (dom.accentHex && document.activeElement !== dom.accentHex) dom.accentHex.value = accentValue;
+    if (dom.baseColor) dom.baseColor.value = baseValue;
+    if (dom.baseHex && document.activeElement !== dom.baseHex) dom.baseHex.value = baseValue;
+    document.querySelectorAll("[data-accent-preset]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(state.accent === button.dataset.accentPreset));
+    });
+    document.querySelectorAll("[data-base-preset]").forEach((button) => {
+      button.setAttribute("aria-pressed", String(state.base === button.dataset.basePreset));
+    });
+  }
+
+  // kind: "accent" | "base"；rawValue 为 null / "" 表示恢复主题默认。
+  function setCustomColor(kind, rawValue) {
+    const label = kind === "accent" ? "强调色" : "底色";
+    let normalized = null;
+    if (rawValue != null && rawValue !== "") {
+      normalized = THEME_MODEL ? THEME_MODEL.normalizeHex(rawValue) : null;
+      if (!normalized) {
+        log("warn", "ui", `${label}不是合法的十六进制颜色`, String(rawValue));
+        updateColorInputs();
+        return;
+      }
+    }
+    state[kind] = normalized;
+    localStorage.setItem(kind === "accent" ? ACCENT_STORAGE_KEY : BASE_STORAGE_KEY, normalized || "");
+    applyCustomColors();
+    refreshVisualThemeCache();
+    state.visualHistory = [];
+    state.visualHistoryTime = 0;
+    writeLocalSettings();
+    log("debug", "ui", normalized ? `已设置${label}` : `已恢复默认${label}`, normalized || "");
   }
 
   function formatDuration(seconds) {
@@ -702,11 +988,26 @@
     }
     else if (magic === "RIFF") info = parseWav(bytes, file);
     else {
-      const parsed = parseId3(bytes);
-      info = finishMp3Info(bytes, parsed, file);
-      info.tags ||= normalizeTags({});
-      const extension = file.name.split(".").pop();
-      info.format = extension && extension !== file.name ? extension.toUpperCase() : "AUDIO";
+      const extension = (file.name.split(".").pop() || "").toLocaleLowerCase();
+      if (magic === "ID3" || extension === "mp3") {
+        const parsed = parseId3(bytes);
+        info = finishMp3Info(bytes, parsed, file);
+        info.tags ||= normalizeTags({});
+        info.format = "MP3";
+      } else {
+        // Ogg/Opus/M4A/AAC/AIFF 等容器不做脆弱的 MPEG 帧同步扫描，
+        // 避免把二进制误判为采样率/码率/时长；这些信息交给 <audio> 元数据。
+        info = {
+          format: (extension || "AUDIO").toUpperCase(),
+          sampleRate: 0,
+          bits: 0,
+          channels: 0,
+          duration: 0,
+          bitrate: 0,
+          coverUrl: "",
+          tags: normalizeTags({}),
+        };
+      }
     }
     if (info.audioMd5) {
       info.signature = `flac:${info.audioMd5}`;
@@ -735,18 +1036,12 @@
     state.objectUrls.clear();
   }
 
-  function releaseTrackObjectUrls(tracks) {
-    for (const track of tracks) {
-      if (!track.coverUrl) continue;
-      URL.revokeObjectURL(track.coverUrl);
-      state.objectUrls.delete(track.coverUrl);
-    }
-  }
-
   function clearPlaybackSource({ cancelPending = true } = {}) {
     if (cancelPending) state.playRequestId++;
     dom.audio.pause();
     dom.audio.removeAttribute("src");
+    delete dom.audio.dataset.playRequest;
+    delete dom.audio.dataset.trackPath;
     dom.audio.load();
     if (state.audioUrl) {
       URL.revokeObjectURL(state.audioUrl);
@@ -823,8 +1118,16 @@
   async function buildTracks(sources) {
     const sorted = sources.sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
     let parsedCount = 0;
-    const tracks = await mapConcurrent(sorted, async (source) => {
-      const info = await parseAudioFile(source.file);
+    let failedCount = 0;
+    const results = await mapConcurrent(sorted, async (source) => {
+      let info;
+      try {
+        info = await parseAudioFile(source.file);
+      } catch (error) {
+        failedCount++;
+        log("warn", "library", "跳过无法解析的文件", `${source.path} · ${error.message}`);
+        return null;
+      }
       if (info.metadataWarning) log("warn", "metadata", "FLAC 元数据读取异常", `${source.path} · ${info.metadataWarning}`);
       parsedCount++;
       if (parsedCount % 25 === 0 || parsedCount === sorted.length) {
@@ -846,45 +1149,113 @@
       };
       return finalizeTrackLabels(track);
     });
+    const tracks = results.filter(Boolean);
+    if (failedCount) log("warn", "library", "部分文件解析失败已跳过", `${failedCount} 个文件`);
     window.ClairLibraryModel.assignStableIds(tracks);
     tracks.forEach(applyMetadataOverride);
     saveJSON("clair-metadata", state.metadata);
     return tracks;
   }
 
-  async function loadLibrarySources(sources, { trashMode = false } = {}) {
-    const loadToken = ++state.libraryLoadToken;
-    releaseObjectUrls();
-    clearPlaybackSource();
-    state.selected.clear();
-    state.currentIndex = -1;
+  function releaseTrackCoverUrls(tracks) {
+    for (const track of tracks) {
+      if (!track?.coverUrl) continue;
+      URL.revokeObjectURL(track.coverUrl);
+      state.objectUrls.delete(track.coverUrl);
+    }
+  }
+
+  function currentTrackPath() {
+    return state.tracks[state.currentIndex]?.path || "";
+  }
+
+  // 操作按钮可见性只由这里决定（远程只读/回收站视图）；不再依赖 CSS !important。
+  function syncActionVisibility() {
+    const remote = state.libraryMode === "remote";
+    const trash = state.trashMode;
+    $("toggle-trash").textContent = trash ? "返回音乐库" : "查看回收站";
+    $("trash-selected").classList.toggle("is-hidden", remote || trash);
+    $("restore-selected").classList.toggle("is-hidden", remote || !trash);
+    $("toggle-trash").classList.toggle("is-hidden", remote);
+    $("rename-current").classList.toggle("is-hidden", remote);
+    $("edit-current-tags").classList.toggle("is-hidden", remote);
+    $("save-tags").classList.toggle("is-hidden", remote);
+  }
+
+  async function loadLibrarySources(sources, { trashMode = false, token = null, preserve = false } = {}) {
+    const loadToken = token ?? ++state.libraryLoadToken;
+    // 进入函数就先校验代际：被取代的加载不应再做任何破坏性清空
+    if (token !== null && token !== state.libraryLoadToken) return;
+
+    const previousTracks = state.tracks;
+    const previousPath = preserve ? currentTrackPath() : "";
+    const previousIds = new Set(state.selected);
+
+    if (!preserve) {
+      releaseObjectUrls();
+      clearPlaybackSource();
+      resetPlayerDisplay();
+      state.selected.clear();
+      state.tracks = [];
+      state.currentIndex = -1;
+      renderLibrary();
+    }
     state.trashMode = trashMode;
-    state.tracks = [];
-    renderLibrary();
+
     if (!sources.length) {
+      if (preserve) {
+        releaseTrackCoverUrls(previousTracks);
+        clearPlaybackSource();
+        resetPlayerDisplay();
+        state.selected.clear();
+        state.currentIndex = -1;
+        state.tracks = [];
+        renderLibrary();
+      }
+      syncActionVisibility();
       updateSourceState(trashMode ? "回收站为空" : "文件夹中没有音频", false);
       dom.navTrackCount.textContent = "0";
-      $("toggle-trash").textContent = trashMode ? "返回音乐库" : "查看回收站";
-      $("trash-selected").classList.toggle("is-hidden", trashMode);
-      $("restore-selected").classList.toggle("is-hidden", !trashMode);
       writeLocalLibraryIndex();
       log("warn", "library", trashMode ? "回收站为空" : "所选文件夹没有可识别音频");
       return;
     }
+
     log("info", "library", `开始解析 ${sources.length} 首曲目`);
     const builtTracks = await buildTracks(sources);
     if (loadToken !== state.libraryLoadToken) {
-      releaseTrackObjectUrls(builtTracks);
+      releaseTrackCoverUrls(builtTracks);
       log("debug", "library", "已丢弃过期的音乐库扫描结果", `${sources.length} 首`);
       return;
     }
     state.tracks = builtTracks;
+    if (preserve) {
+      // 稳定 id 由路径/签名决定，重扫前后一致，因此可保留选择与当前曲目
+      const available = new Set(builtTracks.map((track) => track.id));
+      state.selected = new Set([...previousIds].filter((id) => available.has(id)));
+      const newIndex = previousPath ? builtTracks.findIndex((track) => track.path === previousPath) : -1;
+      if (newIndex >= 0) {
+        state.currentIndex = newIndex;
+        updateNowPlaying(builtTracks[newIndex]);
+      } else if (dom.audio.hasAttribute("src")) {
+        // 正在播放/暂停的文件被本次操作移走、重命名或删除：优雅复位
+        clearPlaybackSource();
+        resetPlayerDisplay();
+        state.currentIndex = -1;
+      } else {
+        resetPlayerDisplay();
+        state.currentIndex = -1;
+      }
+      // 播放器 DOM 已切到新封面后，才回收上一批封面 URL，避免破图
+      releaseTrackCoverUrls(previousTracks);
+    } else {
+      state.selected.clear();
+    }
     renderLibrary();
-    updateSourceState(`${state.directory.name} · ${state.tracks.length} 首`, true);
+    syncActionVisibility();
+    if (state.libraryMode !== "remote") {
+      updateSourceState(`${state.directory?.name || ""} · ${state.tracks.length} 首`, true);
+    }
     dom.navTrackCount.textContent = String(state.tracks.length);
-    $("toggle-trash").textContent = trashMode ? "返回音乐库" : "查看回收站";
-    $("trash-selected").classList.toggle("is-hidden", trashMode);
-    $("restore-selected").classList.toggle("is-hidden", !trashMode);
     writeLocalLibraryIndex();
     log("info", "library", "音乐库载入完成", `${state.tracks.length} 首`);
   }
@@ -898,12 +1269,24 @@
       : state.directory
         ? `\u672c\u5730\u6570\u636e\uff1a${state.directory.name} / ${DATA_DIRECTORY_NAME}`
         : "\u672c\u5730\u6570\u636e\uff1a\u8fde\u63a5\u540e\u521b\u5efa .Clair";
+    syncActionVisibility();
+  }
+
+  // 带超时的 fetch：局域网主机吞包时不至于让 UI 无限停留在"正在连接…"
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 4000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal, cache: options.cache || "no-store" });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function connectRemoteLibrary({ silent = false } = {}) {
     try {
       updateSourceState("\u6b63\u5728\u8fde\u63a5\u5c40\u57df\u7f51\u66f2\u5e93\u2026", false);
-      const statusResponse = await fetch("/api/status", { cache: "no-store" });
+      const statusResponse = await fetchWithTimeout("/api/status");
       if (!statusResponse.ok) {
         if (silent && statusResponse.status === 404) {
           updateSourceState("\u5c1a\u672a\u8fde\u63a5", false);
@@ -913,12 +1296,13 @@
       }
       const status = await statusResponse.json();
       if (!status.configured) throw new Error("\u670d\u52a1\u7aef\u5c1a\u672a\u914d\u7f6e Samba \u97f3\u4e50\u76ee\u5f55");
-      const response = await fetch("/api/library", { cache: "no-store" });
+      const response = await fetchWithTimeout("/api/library");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || `\u66f2\u5e93\u8bf7\u6c42\u5931\u8d25\uff08HTTP ${response.status}\uff09`);
       ++state.libraryLoadToken;
       releaseObjectUrls();
       clearPlaybackSource();
+      resetPlayerDisplay();
       state.selected.clear();
       state.currentIndex = -1;
       state.directory = null;
@@ -950,9 +1334,6 @@
       updateLibraryModeUI();
       updateSourceState(`${state.remoteLibraryName} \u00b7 ${state.tracks.length} \u9996 \u00b7 \u53ea\u8bfb`, true);
       dom.navTrackCount.textContent = String(state.tracks.length);
-      $("toggle-trash").textContent = "\u67e5\u770b\u56de\u6536\u7ad9";
-      $("trash-selected").classList.remove("is-hidden");
-      $("restore-selected").classList.add("is-hidden");
       log("info", "network", "\u5c40\u57df\u7f51\u66f2\u5e93\u5df2\u8fde\u63a5", `${state.remoteLibraryName} \u00b7 ${state.tracks.length} \u9996`);
       return true;
     } catch (error) {
@@ -967,7 +1348,7 @@
     }
   }
 
-  async function refreshLibrary() {
+  async function refreshLibrary({ preserve = true } = {}) {
     if (state.libraryMode === "remote") {
       await connectRemoteLibrary();
       return;
@@ -976,30 +1357,27 @@
       log("warn", "library", "刷新失败：尚未连接音乐文件夹");
       return;
     }
-    const refreshToken = ++state.refreshToken;
+    // 与 loadLibrarySources 共用同一个代际计数，进入扫描前先占位，
+    // 避免旧扫描在清空 UI 之后才被判定过期
+    const token = ++state.libraryLoadToken;
     try {
+      let sources;
       if (state.trashMode) {
         try {
           const trash = await state.directory.getDirectoryHandle(TRASH_NAME);
-          const sources = await scanDirectory(trash, `${TRASH_NAME}/`, true);
-          if (refreshToken !== state.refreshToken) return;
-          await loadLibrarySources(sources, { trashMode: true });
+          sources = await scanDirectory(trash, `${TRASH_NAME}/`, true);
         } catch (error) {
-          if (error.name === "NotFoundError") {
-            if (refreshToken !== state.refreshToken) return;
-            await loadLibrarySources([], { trashMode: true });
-          } else {
-            throw error;
-          }
+          if (error.name !== "NotFoundError") throw error;
+          sources = [];
         }
       } else {
-        const sources = await scanDirectory(state.directory);
-        if (refreshToken !== state.refreshToken) return;
-        await loadLibrarySources(sources);
+        sources = await scanDirectory(state.directory);
       }
+      if (token !== state.libraryLoadToken) return;
+      await loadLibrarySources(sources, { trashMode: state.trashMode, token, preserve });
     } catch (error) {
-      if (refreshToken !== state.refreshToken) return;
-      log("error", "library", "刷新音乐库失败", error.message);
+      if (token !== state.libraryLoadToken) return;
+      log("error", "library", state.trashMode ? "刷新回收站失败" : "刷新音乐库失败", error.message);
       updateSourceState("读取失败", false);
     }
   }
@@ -1046,7 +1424,7 @@
         state.libraryMode = "local";
         await initializeLocalData();
         log("info", "permission", "已恢复音乐文件夹授权", handle.name);
-        await refreshLibrary();
+        await refreshLibrary({ preserve: false });
       }
     } catch (error) {
       log("debug", "permission", "没有可恢复的音乐文件夹授权", error.message);
@@ -1070,7 +1448,7 @@
       await initializeLocalData();
       await rememberDirectory(state.directory);
       log("info", "permission", "用户已授权音乐文件夹", state.directory.name);
-      await refreshLibrary();
+      await refreshLibrary({ preserve: false });
       setView("library");
     } catch (error) {
       if (error.name !== "AbortError") log("error", "permission", "选择音乐文件夹失败", error.message);
@@ -1179,6 +1557,27 @@
     $("restore-selected").textContent = `恢复已选择 (${count})`;
   }
 
+  // 仅切换行高亮，不重建整表（避免丢失滚动位置）
+  function markCurrentRow(index) {
+    for (const row of dom.trackList.querySelectorAll(".track-row")) {
+      row.classList.toggle("is-current", Number(row.dataset.trackIndex) === index);
+    }
+  }
+
+  // 选择状态变化只同步可见复选框与摘要，不整表重建
+  function syncCheckboxState() {
+    for (const checkbox of dom.trackList.querySelectorAll(".track-select")) {
+      checkbox.checked = state.selected.has(checkbox.dataset.trackId);
+    }
+    updateSelectionUI();
+  }
+
+  function patchFavoriteRow(index, track) {
+    const row = dom.trackList.querySelector(`.track-row[data-track-index="${index}"]`);
+    const title = row?.querySelector(".track-primary strong");
+    if (row && title) title.textContent = `${track.favorite ? "♥ " : ""}${track.title}`;
+  }
+
   function currentTrack() {
     return state.tracks[state.currentIndex] || null;
   }
@@ -1189,7 +1588,8 @@
     const requestId = ++state.playRequestId;
     state.currentIndex = index;
     updateNowPlaying(track);
-    renderLibrary();
+    // 只更新行高亮，不再整表重建（保留滚动位置）
+    markCurrentRow(index);
     clearPlaybackSource({ cancelPending: false });
     try {
       const file = track.streamUrl ? null : await track.handle.getFile();
@@ -1199,6 +1599,8 @@
           log("warn", "playback", "Unsupported remote audio format", track.path);
           return;
         }
+        dom.audio.dataset.playRequest = String(requestId);
+        dom.audio.dataset.trackPath = track.path;
         dom.audio.src = track.streamUrl;
         dom.audio.load();
         ensureAudioGraph();
@@ -1218,6 +1620,8 @@
       // 对 Hi-Res FLAC（可达数百 MB）会造成明显的内存峰值与卡顿。
       const playbackSource = file.type ? file : new Blob([file], { type: mimeType });
       state.audioUrl = URL.createObjectURL(playbackSource);
+      dom.audio.dataset.playRequest = String(requestId);
+      dom.audio.dataset.trackPath = track.path;
       dom.audio.src = state.audioUrl;
       dom.audio.load();
       ensureAudioGraph();
@@ -1227,6 +1631,8 @@
         await dom.audio.play();
       }
     } catch (error) {
+      // 快速切歌导致旧 play() 被中断（AbortError）、或已被更新的选择取代：都不是错误
+      if (error.name === "AbortError" || requestId !== state.playRequestId) return;
       const blocked = error.name === "NotAllowedError" && !dom.audio.error;
       log(
         blocked ? "warn" : "error",
@@ -1249,12 +1655,35 @@
     $("meta-album").textContent = track.album || "—";
     $("spine-album").textContent = track.album || track.work || "本地音乐";
     $("spine-year").textContent = track.year || "—";
-    $("cover-letter").textContent = (track.composer || track.title || "C").trim().charAt(0).toUpperCase();
+    $("cover-letter").textContent = coverInitial(track);
     $("cover-shell").classList.toggle("has-cover", Boolean(track.coverUrl));
-    $("cover-image").src = track.coverUrl || "";
+    const coverImage = $("cover-image");
+    coverImage.src = track.coverUrl || "";
+    // 满幅封面层只在真的能显示封面时启用。
+    // 否则它会以一块空层盖住整个唱片区，把樱花主题的"淡墨环 + 印章"埋掉
+    //（实测：无封面时印章几何正常 132×132，但视觉上完全看不见）。
+    const coverLayer = $("cover-bg");
+    const coverBgImage = $("cover-bg-image");
+    if (coverBgImage) {
+      if (track.coverUrl) {
+        coverBgImage.onerror = () => document.body.classList.remove("has-cover-art");
+        coverBgImage.onload = () => document.body.classList.add("has-cover-art");
+        coverBgImage.src = track.coverUrl;
+        // 已在缓存中时 onload 可能不触发，这里补一次判断
+        if (coverBgImage.complete) {
+          document.body.classList.toggle("has-cover-art", coverBgImage.naturalWidth > 0);
+        }
+      } else {
+        coverBgImage.removeAttribute("src");
+        document.body.classList.remove("has-cover-art");
+      }
+    }
+    if (coverLayer) coverLayer.classList.toggle("is-empty", !track.coverUrl);
     $("transport-title").textContent = track.title;
     $("transport-artist").textContent = track.artist || track.composer || track.fileName;
-    $("mini-cover").innerHTML = track.coverUrl ? `<img src="${track.coverUrl}" alt="" />` : `<span>${escapeHTML((track.title || "C").charAt(0))}</span>`;
+    $("mini-cover").innerHTML = track.coverUrl
+      ? `<img src="${track.coverUrl}" alt="" />`
+      : `<span>${escapeHTML(coverInitial(track))}</span>`;
     $("favorite-current").textContent = track.favorite ? "♥ 已收藏" : "♡ 收藏";
     // 封面氛围光：把当前封面作为正在聆听页的模糊背景
     $("player-view").style.setProperty("--cover-bg", track.coverUrl ? `url("${track.coverUrl}")` : "none");
@@ -1271,6 +1700,46 @@
     $("audio-channels").textContent = track.channels === 1 ? "单声道" : track.channels === 2 ? "立体声" : track.channels ? `${track.channels} 声道` : "—";
     $("audio-duration").textContent = formatDuration(track.duration);
     dom.signalBadge.textContent = [track.format, track.bits ? `${track.bits} BIT` : "", track.sampleRate ? `${track.sampleRate / 1000} kHz` : ""].filter(Boolean).join(" · ");
+  }
+
+  // 取首个“字母/数字”字符作为封面占位字母；标题以空白或符号开头时仍能得到可用字形
+  function coverInitial(track) {
+    const source = String((track && (track.composer || track.title)) || "Clair");
+    const match = source.match(/[\p{L}\p{N}]/u);
+    return match ? match[0].toUpperCase() : "C";
+  }
+
+  // 音乐库/播放源被整体重置（换文件夹、清空、文件被移走）时复位正在聆听面板，
+  // 避免封面/文案指向已被 revoke 的 blob URL 或已不存在的曲目
+  function resetPlayerDisplay() {
+    $("now-title").textContent = "让音乐成为可见的风景";
+    $("now-work").textContent = "请选择一首曲目";
+    $("now-credit").textContent = "连接本地音乐文件夹后开始聆听";
+    for (const id of ["meta-artist", "meta-conductor", "meta-orchestra", "meta-composer", "meta-year", "meta-album"]) {
+      $(id).textContent = "—";
+    }
+    $("spine-album").textContent = "本地音乐库";
+    $("spine-year").textContent = "—";
+    $("cover-shell").classList.remove("has-cover");
+    $("cover-image").removeAttribute("src");
+    $("cover-letter").textContent = "C";
+    // 复位时同样要收起满幅封面层，否则樱花主题会留下一块空层盖住唱片区
+    document.body.classList.remove("has-cover-art");
+    const coverLayerReset = $("cover-bg");
+    if (coverLayerReset) coverLayerReset.classList.add("is-empty");
+    const coverBgReset = $("cover-bg-image");
+    if (coverBgReset) coverBgReset.removeAttribute("src");
+    $("transport-title").textContent = "尚未播放";
+    $("transport-artist").textContent = "请选择曲目";
+    $("mini-cover").innerHTML = "<span>C</span>";
+    $("favorite-current").textContent = "♡ 收藏";
+    $("player-view").style.setProperty("--cover-bg", "none");
+    $("edit-current-tags").disabled = true;
+    $("edit-current-tags").textContent = "仅支持 FLAC 元数据";
+    for (const id of ["audio-format", "audio-sample-rate", "audio-bit-depth", "audio-bitrate", "audio-channels", "audio-duration"]) {
+      $(id).textContent = "—";
+    }
+    dom.signalBadge.textContent = "等待载入音频";
   }
 
   function ensureAudioGraph() {
@@ -1327,9 +1796,15 @@
       return;
     }
     ensureAudioGraph();
-    state.audioContext.resume();
-    if (dom.audio.paused) dom.audio.play().catch((error) => log("error", "playback", "播放失败", error.message));
-    else dom.audio.pause();
+    state.audioContext.resume().catch(() => {});
+    if (dom.audio.paused) {
+      dom.audio.play().catch((error) => {
+        if (error.name === "AbortError") return; // 播放被快速切歌/暂停打断，不是错误
+        log("error", "playback", "播放失败", error.message);
+      });
+    } else {
+      dom.audio.pause();
+    }
   }
 
   function navigate(direction) {
@@ -1363,7 +1838,7 @@
     saveJSON("clair-metadata", state.metadata);
     writeLocalLibraryIndex();
     updateNowPlaying(track);
-    renderLibrary();
+    patchFavoriteRow(state.currentIndex, track);
     log("info", "library", track.favorite ? "已收藏曲目" : "已取消收藏", track.title);
   }
 
@@ -1382,7 +1857,7 @@
       log("warn", "metadata", "Remote library is read-only", track.path);
       return;
     }
-    const fields = ["title", "artist", "conductor", "orchestra", "composer", "album", "work", "year"];
+    const fields = TAG_FIELDS;
     for (const field of fields) $(`tag-${field}`).value = track[field] || "";
     $("tag-write-target").textContent = `将直接写入：${track.path}`;
     dom.tagDialog.showModal();
@@ -1468,7 +1943,7 @@
   async function saveFlacMetadata() {
     const track = currentTrack();
     if (!track) return;
-    const fields = ["title", "artist", "conductor", "orchestra", "composer", "album", "work", "year"];
+    const fields = TAG_FIELDS;
     const values = {};
     for (const field of fields) {
       values[field] = $(`tag-${field}`).value.trim();
@@ -1561,9 +2036,25 @@
       if (error.name !== "NotFoundError") throw error;
     }
     const target = await targetDirectory.getFileHandle(track.fileName, { create: true });
-    const writer = await target.createWritable();
-    await writer.write(await track.handle.getFile());
-    await writer.close();
+    let writer;
+    try {
+      writer = await target.createWritable();
+      await writer.write(await track.handle.getFile());
+      await writer.close();
+    } catch (error) {
+      // 复制中途失败时清理残留的半成品文件，否则后续操作会被“同名文件”永久卡死
+      try {
+        if (writer && typeof writer.abort === "function") await writer.abort();
+      } catch {
+        // 忽略中止失败，继续清理
+      }
+      try {
+        await targetDirectory.removeEntry(track.fileName);
+      } catch {
+        // 目标可能根本没建成，忽略
+      }
+      throw error;
+    }
   }
 
   async function removeOriginal(track) {
@@ -1611,20 +2102,27 @@
   }
 
   async function toggleTrash() {
-    if (!state.directory) return;
-    if (state.trashMode) {
-      state.trashMode = false;
-      await refreshLibrary();
-      return;
-    }
+    if (!state.directory || state.libraryMode !== "local") return;
+    // 与刷新共用同一个代际计数，避免与在途扫描互相覆盖
+    const token = ++state.libraryLoadToken;
+    const opening = !state.trashMode;
     try {
-      const trash = await state.directory.getDirectoryHandle(TRASH_NAME);
-      await loadLibrarySources(await scanDirectory(trash, `${TRASH_NAME}/`, true), { trashMode: true });
+      let sources;
+      if (opening) {
+        try {
+          const trash = await state.directory.getDirectoryHandle(TRASH_NAME);
+          sources = await scanDirectory(trash, `${TRASH_NAME}/`, true);
+        } catch (error) {
+          if (error.name !== "NotFoundError") throw error;
+          sources = [];
+        }
+      } else {
+        sources = await scanDirectory(state.directory);
+      }
+      if (token !== state.libraryLoadToken) return;
+      await loadLibrarySources(sources, { trashMode: opening, token, preserve: false });
     } catch (error) {
-      if (error.name === "NotFoundError") {
-        await loadLibrarySources([], { trashMode: true });
-        log("info", "files", "回收站为空");
-      } else log("error", "files", "打开回收站失败", error.message);
+      log("error", "files", "打开回收站失败", error.message);
     }
   }
 
@@ -1644,15 +2142,32 @@
         return;
       }
     }
+    let writer;
+    let copied = false;
     try {
       const target = await track.parentHandle.getFileHandle(name, { create: true });
-      const writer = await target.createWritable();
+      writer = await target.createWritable();
       await writer.write(await track.handle.getFile());
       await writer.close();
+      copied = true;
       await removeOriginal(track);
       log("info", "files", "重命名成功", `${track.fileName} → ${name}`);
       await refreshLibrary();
     } catch (error) {
+      // 复制中途失败时删除残留的新文件名，避免下次重命名被“同名文件已存在”卡死；
+      // 复制已成功只是删除旧文件失败时保留新文件，避免二次损坏
+      if (!copied) {
+        try {
+          if (writer && typeof writer.abort === "function") await writer.abort();
+        } catch {
+          // 忽略
+        }
+        try {
+          await track.parentHandle.removeEntry(name);
+        } catch {
+          // 新文件可能并未创建成功，忽略
+        }
+      }
       log("error", "files", "重命名失败", error.message);
     }
   }
@@ -1689,8 +2204,10 @@
   function exportM3U() {
     const lines = ["#EXTM3U"];
     const orderedItems = window.ClairLibraryModel.flattenTreeItems(getLibraryTree());
+    // 标题/艺术家可能含换行，会拆坏 M3U 行结构
+    const singleLine = (value) => String(value || "").replace(/[\r\n]+/g, " ").trim();
     for (const { track } of orderedItems) {
-      lines.push(`#EXTINF:${Math.round(track.duration) || -1},${track.artist || track.composer} - ${track.title}`);
+      lines.push(`#EXTINF:${Math.round(track.duration) || -1},${singleLine(track.artist || track.composer)} - ${singleLine(track.title)}`);
       lines.push(track.streamUrl ? new URL(track.streamUrl, window.location.href).href : track.path);
     }
     downloadBlob("clair-playlist.m3u", lines.join("\n"), "audio/x-mpegurl;charset=utf-8");
@@ -1703,7 +2220,8 @@
     link.href = url;
     link.download = name;
     link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    // 延后到下载真正开始后再 revoke，避免个别浏览器在下载开始前就撤销 URL
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   function resizeCanvas() {
@@ -1936,6 +2454,132 @@
     context.globalAlpha = 1;
   }
 
+  // 极光幕：把频谱画成三层错位的半透明光带，并沿频谱宽度做色相过渡。
+  // 与其它模式的区别在于它用横向渐变而非纵向渐变着色。
+  function drawAuraSpectrum(context, geometry, colors, time) {
+    const { left, plotWidth, top, baseline } = geometry;
+    const { accent, secondary, fill, grid } = colors;
+    const bars = state.visualLevels.length;
+    const span = baseline - top;
+    const layers = [
+      { offset: 0, alpha: 0.5, scale: 1, stops: [accent, secondary] },
+      { offset: 0.13, alpha: 0.32, scale: 0.82, stops: [secondary, grid] },
+      { offset: 0.27, alpha: 0.2, scale: 0.64, stops: [fill, accent] },
+    ];
+    for (const layer of layers) {
+      const gradient = context.createLinearGradient(left, 0, left + plotWidth, 0);
+      gradient.addColorStop(0, layer.stops[0]);
+      gradient.addColorStop(0.5, layer.stops[1]);
+      gradient.addColorStop(1, layer.stops[0]);
+      context.strokeStyle = gradient;
+      context.globalAlpha = layer.alpha;
+      context.lineWidth = 1.8;
+      context.beginPath();
+      for (let index = 0; index < bars; index++) {
+        const x = left + (index / (bars - 1)) * plotWidth;
+        const wave = Math.sin(index * 0.19 + time / 620 + layer.offset * 9) * 0.06;
+        const y = baseline - Math.min(1, state.visualLevels[index] * layer.scale + wave) * span * 0.96;
+        index ? context.lineTo(x, y) : context.moveTo(x, y);
+      }
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+  }
+
+  // 镀铬：横向拉丝镜面 + 一道扫过的高光条。与柱状画法的区别在于它强调
+  // "反射"——频谱被画成一条连续的金属带，而不是一根根柱子。
+  function drawMetalSpectrum(context, geometry, colors, time) {
+    const { left, plotWidth, top, baseline } = geometry;
+    const { accent, base, text, fill } = colors;
+    const bars = state.visualLevels.length;
+    const span = baseline - top;
+    let peak = 0;
+    for (let index = 0; index < bars; index++) peak = Math.max(peak, state.visualLevels[index]);
+    const bandHeight = Math.max(8, span * 0.5);
+    const bandTop = baseline - bandHeight;
+
+    // 金属带：纵向渐变模拟反射
+    const metal = context.createLinearGradient(0, bandTop, 0, baseline);
+    metal.addColorStop(0, fill);
+    metal.addColorStop(0.42, accent);
+    metal.addColorStop(0.52, text);
+    metal.addColorStop(0.62, accent);
+    metal.addColorStop(1, fill);
+    context.globalAlpha = 0.9;
+    context.fillStyle = metal;
+    context.beginPath();
+    context.moveTo(left, baseline);
+    for (let index = 0; index < bars; index++) {
+      const x = left + (index / (bars - 1)) * plotWidth;
+      context.lineTo(x, baseline - Math.max(0.06, state.visualLevels[index]) * bandHeight);
+    }
+    context.lineTo(left + plotWidth, baseline);
+    context.closePath();
+    context.fill();
+
+    // 扫过的高光条
+    const sweep = ((time / 5200) % 1) * 1.5 - 0.25;
+    const sweepX = left + sweep * plotWidth;
+    const sheen = context.createLinearGradient(sweepX - 90, 0, sweepX + 90, 0);
+    sheen.addColorStop(0, "rgba(255,255,255,0)");
+    sheen.addColorStop(0.5, "rgba(255,255,255,0.34)");
+    sheen.addColorStop(1, "rgba(255,255,255,0)");
+    context.globalAlpha = 0.7;
+    context.fillStyle = sheen;
+    context.fillRect(left, bandTop - 6, plotWidth, bandHeight + 6);
+
+    // 顶边一条亮线，强化"金属边缘"
+    context.globalAlpha = 0.95;
+    context.strokeStyle = text;
+    context.lineWidth = 1;
+    context.beginPath();
+    for (let index = 0; index < bars; index++) {
+      const x = left + (index / (bars - 1)) * plotWidth;
+      const y = baseline - Math.max(0.06, state.visualLevels[index]) * bandHeight;
+      index ? context.lineTo(x, y) : context.moveTo(x, y);
+    }
+    context.stroke();
+    context.globalAlpha = 1;
+    void base;
+  }
+
+  // 余烬：湍流柱 + 高温渐变 + 微闪烁。柱顶抖动、颜色从暗红到亮黄，
+  // 与镀铬的"连续带"和极光的"连续线"都不同。
+  function drawHeatSpectrum(context, geometry, colors, time) {
+    const { left, plotWidth, top, baseline } = geometry;
+    const { accent, base, secondary, fill } = colors;
+    const bars = state.visualLevels.length;
+    const span = baseline - top;
+    const slot = plotWidth / bars;
+    for (let index = 0; index < bars; index++) {
+      const level = state.visualLevels[index];
+      // 湍流：让柱高有细碎抖动
+      const turb = Math.sin(index * 1.7 + time / 130) * 0.05 + Math.sin(index * 0.41 - time / 90) * 0.03;
+      const height = Math.max(2, Math.min(1, level + turb * (1 - level)) * span * 0.94);
+      const x = left + index * slot;
+      const width = Math.max(2, slot - 1.5);
+      const gradient = context.createLinearGradient(0, baseline - height, 0, baseline);
+      gradient.addColorStop(0, secondary);
+      gradient.addColorStop(0.35, accent);
+      gradient.addColorStop(1, base);
+      context.globalAlpha = 0.86;
+      context.fillStyle = gradient;
+      context.fillRect(x, baseline - height, width, height);
+      // 柱顶高光：像烧红的尖端
+      context.globalAlpha = 0.9;
+      context.fillStyle = accent;
+      context.fillRect(x, baseline - height, width, 1.5);
+    }
+    // 底部余温辉光
+    const glow = context.createLinearGradient(0, baseline - span * 0.28, 0, baseline);
+    glow.addColorStop(0, "rgba(255,120,40,0)");
+    glow.addColorStop(1, fill);
+    context.globalAlpha = 0.5;
+    context.fillStyle = glow;
+    context.fillRect(left, baseline - span * 0.28, plotWidth, span * 0.28);
+    context.globalAlpha = 1;
+  }
+
   function drawWaveform(context, geometry, colors, active, time, mode) {
     const { left, plotWidth, baseline, height } = geometry;
     const { secondary } = colors;
@@ -1967,15 +2611,10 @@
       if (!width || !height) return;
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, width, height);
-      const styles = getComputedStyle(document.body);
-      const colors = {
-        accent: styles.getPropertyValue("--accent-bright").trim(),
-        fill: styles.getPropertyValue("--viz-fill").trim(),
-        secondary: styles.getPropertyValue("--viz-secondary").trim(),
-        grid: styles.getPropertyValue("--line").trim(),
-        muted: styles.getPropertyValue("--faint").trim(),
-      };
-      const mode = THEME_DETAILS[state.theme]?.visualizer || "bars";
+      // 颜色/频谱模式只随主题变化：切主题时刷新缓存，渲染循环不再每帧 getComputedStyle
+      if (!visualThemeColors) refreshVisualThemeCache();
+      const colors = visualThemeColors;
+      const mode = visualThemeMode;
       const active = Boolean(state.analyser && !dom.audio.paused && state.frequencyData);
       const motionTime = reducedMotion.matches && !active ? 0 : time;
       const bars = state.visualLevels.length;
@@ -2034,6 +2673,9 @@
       else if (mode === "sakura") drawSakuraSpectrum(context, geometry, colors);
       else if (mode === "contour") drawContourSpectrum(context, geometry, colors);
       else if (mode === "stellar") drawStellarSpectrum(context, geometry, colors);
+      else if (mode === "aura") drawAuraSpectrum(context, geometry, colors, motionTime);
+      else if (mode === "metal") drawMetalSpectrum(context, geometry, colors, motionTime);
+      else if (mode === "heat") drawHeatSpectrum(context, geometry, colors, motionTime);
       else drawBarSpectrum(context, geometry, colors);
       drawWaveform(context, geometry, colors, active, motionTime, mode);
 
@@ -2042,12 +2684,24 @@
         sakura: "BLOSSOM STILL",
         contour: "QUIET TERRAIN",
         stellar: "STAR CHART",
+        aura: "AURORA DRIFT",
+        metal: "POLISHED SHEEN",
+        heat: "BURNING LOW",
         bars: "IDLE MOTION",
       };
-      $("analyzer-level").textContent = active
+      // 仅在内容/颜色真正变化时写 DOM，减少每帧 layout/style 开销
+      const labelText = active
         ? `${(20 * Math.log10(Math.max(average, 0.001))).toFixed(1)} dBFS`
         : idleLabels[mode];
-      $("analyzer-level").style.color = active ? colors.accent : colors.muted;
+      const labelColor = active ? colors.accent : colors.muted;
+      if (labelText !== lastAnalyzerLabel) {
+        lastAnalyzerLabel = labelText;
+        $("analyzer-level").textContent = labelText;
+      }
+      if (labelColor !== lastAnalyzerLabelColor) {
+        lastAnalyzerLabelColor = labelColor;
+        $("analyzer-level").style.color = labelColor;
+      }
     } catch (error) {
       if (error.message !== state.lastVisualizerError) {
         state.lastVisualizerError = error.message;
@@ -2064,8 +2718,33 @@
     $("choose-library").addEventListener("click", chooseLibrary);
     $("connect-lan-library").addEventListener("click", async () => { if (await connectRemoteLibrary()) setView("library"); });
     $("theme-select").addEventListener("change", (event) => applyTheme(event.target.value));
-    $("refresh-library").addEventListener("click", refreshLibrary);
-    dom.search.addEventListener("input", renderLibrary);
+    dom.modeButtons.forEach((button) => {
+      button.addEventListener("click", () => applyMode(button.dataset.modeChoice));
+    });
+    // 系统主题变化只在"跟随系统"时生效；手动选过就保持用户选择。
+    if (typeof systemPrefersDark.addEventListener === "function") {
+      systemPrefersDark.addEventListener("change", () => {
+        if (state.themeMode === "auto") applyMode("auto", { persist: false, announce: false });
+      });
+    }
+    [["accent", dom.accentColor, dom.accentHex, dom.accentReset], ["base", dom.baseColor, dom.baseHex, dom.baseReset]]
+      .forEach(([kind, colorInput, hexInput, resetButton]) => {
+        if (colorInput) colorInput.addEventListener("input", (event) => setCustomColor(kind, event.target.value));
+        if (hexInput) hexInput.addEventListener("change", (event) => setCustomColor(kind, event.target.value));
+        if (resetButton) resetButton.addEventListener("click", () => setCustomColor(kind, null));
+      });
+    document.querySelectorAll("[data-accent-preset]").forEach((button) => {
+      button.addEventListener("click", () => setCustomColor("accent", button.dataset.accentPreset));
+    });
+    document.querySelectorAll("[data-base-preset]").forEach((button) => {
+      button.addEventListener("click", () => setCustomColor("base", button.dataset.basePreset));
+    });
+    $("refresh-library").addEventListener("click", () => refreshLibrary());
+    dom.search.addEventListener("input", () => {
+      // 输入去抖后再重建列表，避免每键整表 innerHTML
+      clearTimeout(searchRenderTimer);
+      searchRenderTimer = setTimeout(renderLibrary, 150);
+    });
     dom.groupMode.addEventListener("change", () => {
       renderLibrary();
       writeLocalSettings();
@@ -2098,11 +2777,11 @@
     });
     $("select-visible").addEventListener("click", () => {
       getFilteredTracks().forEach(({ track }) => state.selected.add(track.id));
-      renderLibrary();
+      syncCheckboxState();
     });
     $("clear-selection").addEventListener("click", () => {
       state.selected.clear();
-      renderLibrary();
+      syncCheckboxState();
     });
     $("collapse-groups").addEventListener("click", () => setVisibleGroupsCollapsed(true));
     $("expand-groups").addEventListener("click", () => setVisibleGroupsCollapsed(false));
@@ -2132,8 +2811,15 @@
       log("debug", "playback", "循环模式已切换", state.repeat);
     });
     dom.seek.addEventListener("input", () => {
-      if (dom.audio.duration) dom.audio.currentTime = dom.audio.duration * Number(dom.seek.value) / 1000;
+      // 拖拽中暂停时实时跳转；播放中只在松开（change）时提交，避免对高码率文件反复 seek 抖动
+      const duration = dom.audio.duration;
       dom.seek.style.setProperty("--fill", `${Number(dom.seek.value) / 10}%`);
+      if (dom.audio.paused && duration) {
+        dom.audio.currentTime = duration * Number(dom.seek.value) / 1000;
+      }
+    });
+    dom.seek.addEventListener("change", () => {
+      if (dom.audio.duration) dom.audio.currentTime = dom.audio.duration * Number(dom.seek.value) / 1000;
     });
     dom.volume.addEventListener("input", () => {
       dom.audio.volume = Number(dom.volume.value);
@@ -2148,7 +2834,10 @@
       dom.play.textContent = "▶";
       document.body.classList.remove("is-playing");
     });
-    dom.audio.addEventListener("ended", () => navigate(1));
+    dom.audio.addEventListener("ended", () => {
+      // 若当前曲目已被清空/移出列表（例如刷新后文件被移走），不要在空列表上乱跳
+      if (state.currentIndex >= 0) navigate(1);
+    });
     dom.audio.addEventListener("loadedmetadata", () => {
       const track = currentTrack();
       if (track) {
@@ -2166,7 +2855,8 @@
     });
     dom.audio.addEventListener("error", () => {
       if (!dom.audio.hasAttribute("src")) return;
-      const track = currentTrack();
+      // 事件来自已被取代的播放源（快速切歌/清理后）时忽略，避免把错误归到新曲目
+      if (dom.audio.dataset.playRequest && dom.audio.dataset.playRequest !== String(state.playRequestId)) return;
       const mediaError = dom.audio.error;
       const errorNames = {
         1: "MEDIA_ERR_ABORTED",
@@ -2179,8 +2869,8 @@
         reason: errorNames[mediaError?.code] || "UNKNOWN",
         message: mediaError?.message || "",
         hint: mediaError?.code === 4 ? "浏览器不支持该文件的格式/编码（AIFF 不受 Chrome/Edge 支持），可转换后重试" : "",
-        path: track?.path || "",
-        mimeType: track?.mimeType || "",
+        path: dom.audio.dataset.trackPath || currentTrack()?.path || "",
+        mimeType: currentTrack()?.mimeType || "",
         networkState: dom.audio.networkState,
         readyState: dom.audio.readyState,
       }));
@@ -2189,7 +2879,14 @@
     $("run-diagnostics").addEventListener("click", runDiagnostics);
     $("export-logs").addEventListener("click", exportLogs);
     $("clear-logs").addEventListener("click", async () => {
+      // 同时丢弃尚未落盘的文件日志，避免清空后被迟到的 flush 重新写入
+      pendingFileLogs.length = 0;
+      if (logFileTimer) {
+        clearTimeout(logFileTimer);
+        logFileTimer = 0;
+      }
       state.logs = [];
+      logsViewDirty = false;
       saveJSON("clair-logs", state.logs);
       renderLogs();
       await clearLocalLogFile();
@@ -2206,6 +2903,8 @@
     window.addEventListener("beforeunload", () => {
       clearPlaybackSource();
       releaseObjectUrls();
+      // 尽力把内存日志同步进 localStorage（磁盘 flush 为异步，交由页面关闭流程）
+      saveJSON("clair-logs", state.logs);
     });
     new ResizeObserver(resizeCanvas).observe(dom.canvas);
     dom.volume.style.setProperty("--fill", `${Number(dom.volume.value) * 100}%`);
@@ -2215,6 +2914,11 @@
   async function boot() {
     removeLegacyDisplayOverrides();
     applyTheme(state.theme);
+    applyMode(state.themeMode, { announce: false });
+    // 深链里的配色与主题/模式一样写回本地：分享链接打开后刷新仍保持一致。
+    localStorage.setItem(ACCENT_STORAGE_KEY, state.accent || "");
+    localStorage.setItem(BASE_STORAGE_KEY, state.base || "");
+    syncThemeColor();
     bindEvents();
     resizeCanvas();
     requestAnimationFrame(drawVisualizer);

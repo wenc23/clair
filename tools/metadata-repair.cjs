@@ -10,14 +10,34 @@ const {
   walk,
 } = require("./metadata-audit.cjs");
 
-const APPLY = process.argv.includes("--apply");
-const INCLUDE_TRASH = process.argv.includes("--include-trash");
-const rootArg = process.argv.find((argument, index) => index > 1 && !argument.startsWith("--"));
-if (!rootArg) throw new Error("Usage: node metadata-repair.cjs <music-root> [--apply]");
+function usage() {
+  return [
+    "用法：node tools/metadata-repair.cjs <音乐目录> [选项]",
+    "",
+    "扫描 <音乐目录> 下音频文件的元数据问题并预览修复方案；默认只预览不写入。",
+    "本脚本包含针对特定音乐库的硬编码修复项（MANUAL_FIXES），",
+    "仅适用于与之匹配的目录结构与文件路径，--apply 前请先核对预览。",
+    "",
+    "选项：",
+    "  --apply              将修复写入文件；写入前会把原文件头部备份到",
+    "                        <音乐目录>/.Clair/metadata-repair-<时间戳>/ 并记录 manifest.json",
+    "  --include-trash      一并处理 <音乐目录>/.Clair 回收站 下的文件",
+    "  --help, -h           显示本帮助并退出",
+  ].join("\n");
+}
 
-const ROOT = path.resolve(rootArg);
-const RUN_ID = new Date().toISOString().replace(/[:.]/g, "-");
-const BACKUP_ROOT = path.join(ROOT, ".Clair", `metadata-repair-${RUN_ID}`);
+function parseCliArguments(argv) {
+  const options = { apply: false, includeTrash: false, help: false, root: "" };
+  for (const argument of argv.slice(2)) {
+    if (argument === "--apply") options.apply = true;
+    else if (argument === "--include-trash") options.includeTrash = true;
+    else if (argument === "--help" || argument === "-h") options.help = true;
+    else if (argument.startsWith("-")) throw new Error(`未知选项：${argument}\n\n${usage()}`);
+    else if (!options.root) options.root = argument;
+    else throw new Error(`多余参数：${argument}\n\n${usage()}`);
+  }
+  return options;
+}
 const MANUAL_FIXES = new Map([
   ["artchive/宇多田光-one last kiss.flac", {
     TITLE: "One Last Kiss",
@@ -160,6 +180,155 @@ const CANONICAL_KEYS = new Set([
   "CONDUCTOR", "ORCHESTRA", "WORK", "TRACKNUMBER", "DISCNUMBER",
 ]);
 
+// 旧编码标签的恢复：Vorbis 注释可能以 gb18030 或 Shift-JIS 写入（尤其日文标签）。
+// 这里尝试所有候选解码并打分，选取最可信的结果，而不是一律按 gb18030 处理。
+const LEGACY_ENCODINGS = [
+  { encoding: "gb18030", decode: (bytes) => new TextDecoder("gb18030").decode(bytes) },
+  { encoding: "shift-jis", decode: (bytes) => new TextDecoder("shift_jis").decode(bytes) },
+];
+
+// 对单个候选解码文本打分：
+//   - U+FFFD 替换符与控制字符 → 重罚（“解码不干净”的主要信号）；
+//   - 可打印 ASCII 与 KEY=VALUE 结构 → 加分；
+//   - 全角假名（hiragana/katakana）→ 强日文信号加分；
+//   - 半角假名 → 扣分（把 GB 中文字节误作 Shift-JIS 解码时的典型产物）；
+//   - 常用 CJK 加分，扩展区/兼容区/增补平面的生僻字扣分。
+function legacyCandidateScore(value, keyHint) {
+  const text = String(value ?? "");
+  if (!text) return -Infinity;
+  let replacements = 0;
+  let controls = 0;
+  let asciiPrintable = 0;
+  let fullwidthKana = 0;
+  let halfwidthKana = 0;
+  let commonCjk = 0;
+  let rareCjk = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    if (char === "\uFFFD") replacements++;
+    else if (code < 0x20 || (code >= 0x7f && code < 0xa0)) controls++;
+    else if (code >= 0x20 && code <= 0x7e) asciiPrintable++;
+    else if (code >= 0x3040 && code <= 0x30ff) fullwidthKana++;
+    else if (code >= 0xff61 && code <= 0xff9f) halfwidthKana++;
+    else if ((code >= 0x3400 && code <= 0x4dbf)
+      || (code >= 0xf900 && code <= 0xfaff)
+      || code > 0x20000) rareCjk++;
+    else if (code >= 0x4e00 && code <= 0x9fff) commonCjk++;
+  }
+  let score = 0;
+  score -= replacements * 200;
+  score -= controls * 60;
+  score += asciiPrintable;
+  score += fullwidthKana * 6;
+  score -= halfwidthKana * 4;
+  score += commonCjk;
+  score -= rareCjk * 2;
+  const separator = text.indexOf("=");
+  if (separator >= 1) {
+    score += 50;
+    const candidateKey = text.slice(0, separator).trim();
+    if (/^[A-Z0-9_]{2,32}$/i.test(candidateKey)) score += 30;
+    if (keyHint && candidateKey.toUpperCase() === String(keyHint).toUpperCase()) score += 20;
+  } else if (separator === 0) {
+    score -= 25;
+  } else {
+    score -= 40;
+  }
+  return score;
+}
+
+// GB18030 中文正文的非 ASCII 字节绝大部分落在 0xB0-0xF7 的汉字区；
+// Shift-JIS 日文的双字节前导集中在 0x81-0x9F / 0xE0-0xEF（另有全角假名区），
+// 该比值显著偏低。用它做中文侧的额外证据，避免“全汉字”标签在两种编码下都
+// 可解码成汉字时误选。
+function gbByteRatio(bytes) {
+  let nonAscii = 0;
+  let gbLead = 0;
+  for (const byte of bytes) {
+    if (byte >= 0x80) {
+      nonAscii++;
+      if (byte >= 0xb0 && byte <= 0xf7) gbLead++;
+    }
+  }
+  return nonAscii ? gbLead / nonAscii : 0;
+}
+
+// 用所有候选编码解码同一段字节，返回得分最高的结果。
+// 同分时保留第一个候选（gb18030），维持原有的中文优先行为。
+function decodeLegacyBytes(bytes, hint = "") {
+  const gbBoost = gbByteRatio(bytes) >= 0.55 ? 120 : 0;
+  let best = null;
+  let bestScore = -Infinity;
+  for (let index = 0; index < LEGACY_ENCODINGS.length; index++) {
+    const candidate = LEGACY_ENCODINGS[index];
+    const value = candidate.decode(bytes);
+    const score = legacyCandidateScore(value, hint)
+      + (index === 0 ? gbBoost : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { encoding: candidate.encoding, value, score };
+    }
+  }
+  return best;
+}
+
+// 从 audit 的 comment 对象中恢复键与值：优先用原始字节（rawBase64）重新解码，
+// 否则在预计算的 candidates 中打分择优。均无法还原 KEY=VALUE 结构时抛出可操作的错误。
+function recoverLegacyComment(comment) {
+  const hint = String(comment.key || comment.originalKey || "");
+  let attempts = null;
+  if (comment.rawBase64) {
+    try {
+      const bytes = Buffer.from(comment.rawBase64, "base64");
+      if (bytes.length) {
+        attempts = LEGACY_ENCODINGS.map((candidate) => ({
+          encoding: candidate.encoding,
+          value: candidate.decode(bytes),
+        }));
+      }
+    } catch {
+      attempts = null;
+    }
+  }
+  if (!attempts) {
+    const candidates = comment.candidates || {};
+    attempts = [];
+    if (candidates.gb18030 != null) attempts.push({ encoding: "gb18030", value: String(candidates.gb18030) });
+    if (candidates.shiftJis != null) attempts.push({ encoding: "shift-jis", value: String(candidates.shiftJis) });
+  }
+  if (!attempts.length) {
+    throw new Error(
+      `标签 ${hint ? `“${hint}”` : "（键名未知）"} 缺少原始字节与解码候选，无法恢复编码`
+    );
+  }
+  const gbBoost = gbByteRatio(
+    Buffer.from(comment.rawBase64 || "", "base64")
+  ) >= 0.55 ? 120 : 0;
+  let best = null;
+  let bestScore = -Infinity;
+  for (let index = 0; index < attempts.length; index++) {
+    const score = legacyCandidateScore(attempts[index].value, hint)
+      + (attempts[index].encoding === "gb18030" ? gbBoost : 0);
+    if (score > bestScore) {
+      bestScore = score;
+      best = { ...attempts[index], score };
+    }
+  }
+  const separator = best.value.indexOf("=");
+  if (separator < 1) {
+    throw new Error(
+      `标签 ${hint ? `“${hint}”` : "（键名未知）"} 的字节按 gb18030 与 Shift-JIS 均无法还原为 ` +
+      `KEY=VALUE 结构，已跳过。原始字节：${comment.rawBase64 || "(未提供)"}。` +
+      `请改用支持多编码的标签编辑器手工修复，或先用 metadata-audit.cjs 确认实际编码。`
+    );
+  }
+  return {
+    key: best.value.slice(0, separator).trim().toUpperCase(),
+    value: best.value.slice(separator + 1).trim(),
+    encoding: best.encoding,
+  };
+}
+
 function readExact(fd, length, position) {
   const buffer = Buffer.alloc(length);
   const count = fs.readSync(fd, buffer, 0, length, position);
@@ -229,11 +398,9 @@ function normalizedComments(parsed, reasons) {
     let key = comment.originalKey || comment.key;
     let value = comment.value;
     if (!comment.validUtf8) {
-      const recovered = comment.candidates?.gb18030 || "";
-      const separator = recovered.indexOf("=");
-      if (separator < 1) throw new Error(`Unable to recover invalid comment ${comment.key}`);
-      key = recovered.slice(0, separator).toUpperCase();
-      value = recovered.slice(separator + 1).trim();
+      const recovered = recoverLegacyComment(comment);
+      key = recovered.key;
+      value = recovered.value;
       reasons.add("repair-invalid-utf8");
     }
     const upperKey = key.toUpperCase();
@@ -445,9 +612,9 @@ function validateRepaired(filePath, plan, expectedAudioHash) {
   return { newOffset, audioSha256: actualAudioHash };
 }
 
-function applyPlan(filePath, relativePath, plan, manifest) {
+function applyPlan(filePath, relativePath, plan, manifest, backupRoot) {
   const prefixFile = backupName(relativePath);
-  fs.writeFileSync(path.join(BACKUP_ROOT, prefixFile), plan.originalPrefix, { flag: "wx" });
+  fs.writeFileSync(path.join(backupRoot, prefixFile), plan.originalPrefix, { flag: "wx" });
   const beforeStat = fs.statSync(filePath);
   const audioHash = sha256Region(filePath, plan.oldAudioOffset);
   const newPath = `${filePath}.clair-new-${process.pid}.tmp`;
@@ -478,7 +645,7 @@ function applyPlan(filePath, relativePath, plan, manifest) {
       afterTags: plan.afterTags,
     });
     fs.writeFileSync(
-      path.join(BACKUP_ROOT, "manifest.json"),
+      path.join(backupRoot, "manifest.json"),
       JSON.stringify(manifest, null, 2),
       "utf8"
     );
@@ -492,12 +659,48 @@ function applyPlan(filePath, relativePath, plan, manifest) {
   }
 }
 
-function main() {
-  if (!fs.statSync(ROOT).isDirectory()) throw new Error(`Not a directory: ${ROOT}`);
-  if (APPLY) {
-    process.stdout.write("⚠ 本脚本包含针对特定音乐库的硬编码修复项（MANUAL_FIXES），\n");
-    process.stdout.write("  仅适用于与之匹配的目录结构与文件路径，写入前请先核对下方预览。\n");
+// 单文件应用失败后的善后：若原文件仍停留在 .clair-original-*.tmp（说明回滚中断），
+// 尽量先还原；再清理该文件遗留的 .clair-new-*.tmp / .clair-failed-*.tmp 半成品。
+function cleanupTemporaryFiles(filePath) {
+  const originalPath = `${filePath}.clair-original-${process.pid}.tmp`;
+  try {
+    if (fs.existsSync(originalPath) && !fs.existsSync(filePath)) {
+      fs.renameSync(originalPath, filePath);
+    }
+  } catch {
+    // 无法自动还原时保留 .clair-original-*.tmp，交由用户手工处理
   }
+  for (const suffix of [`.clair-new-${process.pid}.tmp`, `.clair-failed-${process.pid}.tmp`]) {
+    const candidate = `${filePath}${suffix}`;
+    try {
+      if (fs.existsSync(candidate)) fs.unlinkSync(candidate);
+    } catch {
+      // 忽略清理失败，不影响主流程
+    }
+  }
+}
+
+function main(argv = process.argv) {
+  const options = parseCliArguments(argv);
+  if (options.help) {
+    process.stdout.write(`${usage()}\n`);
+    return;
+  }
+  if (!options.root) throw new Error(`缺少音乐目录\n\n${usage()}`);
+  const ROOT = path.resolve(options.root);
+  const APPLY = options.apply;
+  const INCLUDE_TRASH = options.includeTrash;
+  const RUN_ID = new Date().toISOString().replace(/[:.]/g, "-");
+  const BACKUP_ROOT = path.join(ROOT, ".Clair", `metadata-repair-${RUN_ID}`);
+  let stat;
+  try {
+    stat = fs.statSync(ROOT);
+  } catch {
+    throw new Error(`目录不存在：${ROOT}`);
+  }
+  if (!stat.isDirectory()) throw new Error(`不是目录：${ROOT}`);
+  process.stdout.write("⚠ 本脚本包含针对特定音乐库的硬编码修复项（MANUAL_FIXES），\n");
+  process.stdout.write("  仅适用于与之匹配的目录结构与文件路径，写入前请先核对下方预览。\n");
   const files = walk(ROOT)
     .filter((filePath) => {
       const relative = path.relative(ROOT, filePath).replaceAll("\\", "/");
@@ -506,21 +709,27 @@ function main() {
     })
     .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const plans = [];
+  const scanErrors = [];
   for (const filePath of files) {
     const relativePath = path.relative(ROOT, filePath).replaceAll("\\", "/");
     const extension = path.extname(filePath).toLowerCase();
-    const plan = extension === ".flac"
-      ? flacRepairPlan(filePath, relativePath)
-      : extension === ".mp3"
-        ? mp3RepairPlan(filePath, relativePath)
-        : null;
-    if (plan) plans.push({ filePath, relativePath, plan });
+    try {
+      const plan = extension === ".flac"
+        ? flacRepairPlan(filePath, relativePath)
+        : extension === ".mp3"
+          ? mp3RepairPlan(filePath, relativePath)
+          : null;
+      if (plan) plans.push({ filePath, relativePath, plan });
+    } catch (error) {
+      scanErrors.push({ path: relativePath, error: error.message });
+    }
   }
   const preview = {
     root: ROOT,
     mode: APPLY ? "apply" : "dry-run",
     scanned: files.length,
     changes: plans.length,
+    scanErrors,
     byReason: {},
     files: plans.map(({ relativePath, plan }) => ({
       path: relativePath,
@@ -534,7 +743,12 @@ function main() {
     }
   }
   process.stdout.write(`${JSON.stringify(preview, null, 2)}\n`);
-  if (!APPLY || !plans.length) return;
+  if (!APPLY || !plans.length) {
+    if (scanErrors.length) {
+      process.stderr.write(`注意：${scanErrors.length} 个文件无法生成修复方案（见 preview.scanErrors）。\n`);
+    }
+    return;
+  }
   fs.mkdirSync(BACKUP_ROOT, { recursive: true });
   const manifest = {
     version: 1,
@@ -542,17 +756,75 @@ function main() {
     createdAt: new Date().toISOString(),
     status: "in-progress",
     files: [],
+    failures: [],
   };
-  fs.writeFileSync(path.join(BACKUP_ROOT, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
+  const manifestPath = path.join(BACKUP_ROOT, "manifest.json");
+  const writeManifest = () => fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  writeManifest();
+  let succeeded = 0;
+  let failed = 0;
+  for (const scanError of scanErrors) {
+    failed++;
+    process.stderr.write(`✗ 无法生成修复方案 ${scanError.path}：${scanError.error}\n`);
+    manifest.failures.push({
+      path: scanError.path,
+      stage: "plan",
+      error: scanError.error,
+      at: new Date().toISOString(),
+    });
+  }
+  writeManifest();
   for (let index = 0; index < plans.length; index++) {
     const { filePath, relativePath, plan } = plans[index];
     process.stdout.write(`[${index + 1}/${plans.length}] ${relativePath}\n`);
-    applyPlan(filePath, relativePath, plan, manifest);
+    try {
+      applyPlan(filePath, relativePath, plan, manifest, BACKUP_ROOT);
+      succeeded++;
+    } catch (error) {
+      failed++;
+      process.stderr.write(`✗ 修复失败 ${relativePath}：${error.message}\n`);
+      cleanupTemporaryFiles(filePath);
+      manifest.failures.push({
+        path: relativePath,
+        stage: "apply",
+        error: error.message,
+        at: new Date().toISOString(),
+      });
+      writeManifest();
+    }
   }
-  manifest.status = "complete";
+  manifest.status = failed > 0 ? "completed-with-errors" : "complete";
   manifest.completedAt = new Date().toISOString();
-  fs.writeFileSync(path.join(BACKUP_ROOT, "manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
-  process.stdout.write(`Backup: ${BACKUP_ROOT}\n`);
+  manifest.succeeded = succeeded;
+  manifest.failed = failed;
+  writeManifest();
+  process.stdout.write(`应用完成：成功 ${succeeded} 个，失败 ${failed} 个。\n`);
+  process.stdout.write(`备份目录：${BACKUP_ROOT}\n`);
+  if (failed > 0) process.exitCode = 1;
 }
 
-main();
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`错误：${error.message}\n`);
+    process.exitCode = 1;
+  }
+}
+
+module.exports = {
+  addManualFix,
+  buildVorbisPayload,
+  cleanupTemporaryFiles,
+  decodeLegacyBytes,
+  flacRepairPlan,
+  legacyCandidateScore,
+  mp3AudioOffset,
+  mp3RepairPlan,
+  normalizedComments,
+  parseCliArguments,
+  parseFlacLayout,
+  recoverLegacyComment,
+  setTag,
+  usage,
+};

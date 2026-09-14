@@ -39,6 +39,9 @@ jobs:
       - name: Syntax check
         run: npm run check:syntax
 
+      - name: Static contract check
+        run: npm run check:static
+
       - name: Run tests
         run: npm test
 
@@ -46,5 +49,11 @@ jobs:
         run: npm run check:themes
 
       - name: Tools smoke check
-        run: node tools/flac-auto-metadata.cjs --help > /dev/null && node tools/metadata-audit.cjs "$PWD" > /dev/null
-        if: runner.os == 'Linux'
+        run: |
+          node tools/flac-auto-metadata.cjs --help > /dev/null
+          node tools/metadata-audit.cjs --help > /dev/null
+          node tools/metadata-repair.cjs --help > /dev/null
+          node tools/extract-flac-cover.cjs --help > /dev/null
+          node tools/metadata-audit.cjs . > /dev/null
+          node tools/metadata-audit.cjs . --fail-on-issues > /dev/null
+          node tools/metadata-repair.cjs . > /dev/null

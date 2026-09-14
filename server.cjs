@@ -4,7 +4,7 @@ const path = require("path");
 
 const root = path.resolve(__dirname);
 const port = Number(process.env.CLAIR_PORT) || 8000;
-const publicFiles = new Set(["index.html", "styles.css", "app.js", "flac-metadata.js", "library-model.js"]);
+const publicFiles = new Set(["index.html", "styles.css", "app.js", "flac-metadata.js", "library-model.js", "theme-model.js"]);
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -61,7 +61,22 @@ const server = http.createServer((request, response) => {
     );
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");
-    fs.createReadStream(filePath).pipe(response);
+    if (request.method === "HEAD") {
+      // HEAD 只回响应头（Content-Length 与 GET 语义一致），不读取/发送文件内容
+      response.setHeader("Content-Length", String(stats.size));
+      response.end();
+      return;
+    }
+    // 文件可能在 stat 与 open 之间消失（如 Samba 挂载目录），
+    // 捕获流的 error 避免未捕获异常使整个服务器进程崩溃。
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", () => {
+      if (!response.headersSent) response.writeHead(404).end("Not found");
+      else response.destroy();
+    });
+    // 客户端提前断开时停止继续读取文件
+    response.on("close", () => stream.destroy());
+    stream.pipe(response);
   });
 });
 

@@ -14,6 +14,8 @@ const MANAGED_KEYS = new Set([
   "TITLE", "ARTIST", "ALBUM", "DATE", "TRACKNUMBER", "DISCNUMBER",
   "COMPOSER", "CONDUCTOR", "ORCHESTRA", "WORK",
 ]);
+// 与 validateAiTags 共用：单个标签值的长度上限（字符数）。
+const MAX_TAG_VALUE_LENGTH = 500;
 const DEFAULT_SETTLE_MS = 3_000;
 const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
 const DEFAULT_DEEPSEEK_CONFIDENCE = 0.92;
@@ -59,11 +61,20 @@ function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+// 让任何来源的标签值都能安全地进入 Vorbis KEY=VALUE 帧：
+// 去掉控制字符（含 \r\n）、限制长度，并把值内可能误导定界符的 “=” 换成全角 “＝”。
+function sanitizeTagValue(raw) {
+  let value = String(raw ?? "").replace(/[\u0000-\u001f\u007f]/g, " ");
+  value = normalizeText(value).replace(/=/g, "＝");
+  if (value.length > MAX_TAG_VALUE_LENGTH) value = value.slice(0, MAX_TAG_VALUE_LENGTH);
+  return value;
+}
+
 function parseSetValue(raw) {
   const separator = raw.indexOf("=");
   if (separator < 1) throw new Error(`--set 格式应为 KEY=VALUE：${raw}`);
   const key = raw.slice(0, separator).trim().toUpperCase();
-  const value = normalizeText(raw.slice(separator + 1));
+  const value = sanitizeTagValue(raw.slice(separator + 1));
   if (!MANAGED_KEYS.has(key)) throw new Error(`--set 不支持字段：${key}`);
   if (!value) throw new Error(`--set 的值不能为空：${key}`);
   return [key, value];
@@ -225,8 +236,10 @@ function inferUpdates({ relativePath, fileName, comments, defaults = {}, directo
     ...defaults,
   };
   for (const [key, value] of Object.entries(candidates)) {
-    if (!MANAGED_KEYS.has(key) || tags.get(key) || !normalizeText(value)) continue;
-    changes[key] = normalizeText(value);
+    if (!MANAGED_KEYS.has(key) || tags.get(key)) continue;
+    const cleaned = sanitizeTagValue(value);
+    if (!cleaned) continue;
+    changes[key] = cleaned;
   }
   return changes;
 }
@@ -244,8 +257,8 @@ function validateAiTags(value) {
   const tags = {};
   for (const [rawKey, rawValue] of Object.entries(value)) {
     const key = String(rawKey).toUpperCase();
-    const tagValue = normalizeText(rawValue);
-    if (!MANAGED_KEYS.has(key) || !tagValue || tagValue.length > 500 || /[\u0000-\u001f]/.test(tagValue)) continue;
+    const tagValue = sanitizeTagValue(rawValue);
+    if (!MANAGED_KEYS.has(key) || !tagValue || tagValue.length > MAX_TAG_VALUE_LENGTH) continue;
     if (key === "DATE" && !/^\d{4}(?:-\d{2}-\d{2})?$/.test(tagValue)) continue;
     if (["TRACKNUMBER", "DISCNUMBER"].includes(key) && !/^\d{1,3}$/.test(tagValue)) continue;
     tags[key] = tagValue;
@@ -316,6 +329,70 @@ function validateAiSequence(result, sequenceLength) {
   };
 }
 
+// DeepSeek 请求：30s 超时 + 最多 2 次重试（HTTP 429/5xx 与网络错误退避后重试）。
+// 注意：任何日志/错误信息都不得包含 Authorization 头或 API 密钥。
+const DEEPSEEK_TIMEOUT_MS = 30_000;
+const DEEPSEEK_RETRIES = 2;
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function backoffMilliseconds(attempt) {
+  return 1_000 * 2 ** attempt; // 1s、2s
+}
+
+function retryAfterMilliseconds(headers) {
+  const raw = headers && typeof headers.get === "function" ? headers.get("retry-after") : null;
+  if (!raw) return null;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, DEEPSEEK_TIMEOUT_MS);
+  return null; // HTTP-date 形式：使用默认退避
+}
+
+// 旧版 Node 没有 AbortSignal.timeout 时的回退：AbortController + setTimeout。
+function createTimeoutSignal(milliseconds) {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    return { signal: AbortSignal.timeout(milliseconds) };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), milliseconds);
+  if (typeof timer.unref === "function") timer.unref();
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
+function isAbortError(error) {
+  return Boolean(error) && (error.name === "AbortError" || error.name === "TimeoutError");
+}
+
+async function fetchDeepSeek(url, fetchOptions) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= DEEPSEEK_RETRIES; attempt++) {
+    const { signal, clear } = createTimeoutSignal(DEEPSEEK_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { ...fetchOptions, signal });
+      if (typeof clear === "function") clear();
+      if (response.status === 429 || response.status >= 500) {
+        lastError = new Error(`DeepSeek API 临时错误（HTTP ${response.status}）`);
+        if (attempt >= DEEPSEEK_RETRIES) return response; // 最后一次：交给调用方输出详细错误
+        await delay(retryAfterMilliseconds(response.headers) ?? backoffMilliseconds(attempt));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      if (typeof clear === "function") clear();
+      if (isAbortError(error)) {
+        lastError = new Error(`DeepSeek API 请求超时（单次超过 ${DEEPSEEK_TIMEOUT_MS / 1000}s，已重试 ${attempt} 次）`);
+      } else {
+        lastError = error;
+      }
+      if (attempt >= DEEPSEEK_RETRIES) throw lastError;
+      await delay(backoffMilliseconds(attempt));
+    }
+  }
+  throw lastError;
+}
+
 async function requestDeepSeekSequenceMatch({ relativeDirectory, rootName, model, siblingSequence }) {
   const input = {
     rootFolder: rootName,
@@ -332,7 +409,7 @@ async function requestDeepSeekSequenceMatch({ relativeDirectory, rootName, model
     "For uncertain cases return confidence below 0.92 and empty tags for the affected positions.",
     "JSON schema: {\"confidence\":0.0,\"tracks\":[{\"position\":1,\"tags\":{\"TITLE\":\"\",\"ARTIST\":\"\",\"ALBUM\":\"\",\"DATE\":\"\",\"COMPOSER\":\"\",\"CONDUCTOR\":\"\",\"ORCHESTRA\":\"\",\"WORK\":\"\",\"TRACKNUMBER\":\"\",\"DISCNUMBER\":\"\"}}],\"evidence\":\"short reason\"}",
   ].join(" ");
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
+  const response = await fetchDeepSeek("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -729,6 +806,53 @@ async function scan(options, processor) {
   return totals;
 }
 
+// Linux 不支持 fs.watch({ recursive: true })（会抛 ERR_FEATURE_UNAVAILABLE_ON_PLATFORM），
+// 这里提供轻量轮询回退：每 2s 遍历树并比对 .flac 的 mtime/size，把新增/变化文件
+// 交给同一个防抖队列处理。macOS/Windows 仍走原生递归监听。
+const POLL_WATCH_INTERVAL_MS = 2_000;
+
+function flacFileSnapshot(directory) {
+  const snapshot = new Map();
+  const pending = [directory];
+  while (pending.length) {
+    const current = pending.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue; // 目录可能刚被删除，忽略
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!isInsideClair(directory, fullPath)) pending.push(fullPath);
+      } else if (isFlac(entry.name)) {
+        try {
+          const stat = fs.statSync(fullPath);
+          snapshot.set(fullPath, { size: stat.size, mtimeMs: Math.trunc(stat.mtimeMs) });
+        } catch {
+          // 文件可能正在写入或已被删除，本次采样跳过
+        }
+      }
+    }
+  }
+  return snapshot;
+}
+
+function startPollingWatcher(options, queue) {
+  let previous = flacFileSnapshot(options.root);
+  setInterval(() => {
+    const current = flacFileSnapshot(options.root);
+    for (const [filePath, fingerprint] of current) {
+      const old = previous.get(filePath);
+      if (!old || old.size !== fingerprint.size || old.mtimeMs !== fingerprint.mtimeMs) {
+        queue(filePath);
+      }
+    }
+    previous = current;
+  }, POLL_WATCH_INTERVAL_MS);
+}
+
 function watch(options, processor) {
   const pending = new Map();
   const queue = (filePath) => {
@@ -744,10 +868,25 @@ function watch(options, processor) {
       }
     }, options.settleMs));
   };
-  fs.watch(options.root, { recursive: true }, (_event, fileName) => {
-    if (fileName) queue(path.resolve(options.root, fileName.toString()));
-  });
-  process.stdout.write(`正在监听新增 FLAC：${options.root}\n按 Ctrl+C 停止。\n`);
+  let modeDescription;
+  const prefersPolling = process.platform === "linux";
+  if (prefersPolling) {
+    startPollingWatcher(options, queue);
+    modeDescription = `轮询监听（Linux 不支持递归 fs.watch；每 ${POLL_WATCH_INTERVAL_MS / 1000}s 比对 .flac 的 mtime/size）`;
+  } else {
+    try {
+      fs.watch(options.root, { recursive: true }, (_event, fileName) => {
+        if (fileName) queue(path.resolve(options.root, fileName.toString()));
+      });
+      modeDescription = "原生递归监听（fs.watch recursive）";
+    } catch (error) {
+      startPollingWatcher(options, queue);
+      modeDescription = `轮询监听（递归 fs.watch 不可用：${error.code || error.message}）`;
+    }
+  }
+  process.stdout.write(`正在监听新增 FLAC：${options.root}\n`);
+  process.stdout.write(`监听模式：${modeDescription}\n`);
+  process.stdout.write("按 Ctrl+C 停止。\n");
 }
 
 async function main() {
@@ -783,9 +922,11 @@ module.exports = {
   mergeAiUpdates,
   parseArguments,
   readSiblingSequence,
+  sanitizeTagValue,
   validateAiSequence,
   validateAiTags,
   titleFromFileName,
   trackNumberFromFileName,
+  watch,
   yearFromPath,
 };
