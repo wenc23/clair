@@ -126,7 +126,7 @@ assert.equal(
 /* ---------- 4c. 每套主题必须有自己独有的面板配方 ---------- */
 const recipes = [];
 for (const theme of THEMES) {
-  const recipe = themeBlock(theme).match(/--panel-recipe:([\s\S]*?);\n/);
+  const recipe = themeBlock(theme).match(/--panel-recipe:([\s\S]*?);\r?\n/);
   assert.ok(recipe, `主题 "${theme}" 必须声明 --panel-recipe`);
   recipes.push(recipe[1].replace(/\s+/g, " ").trim());
 }

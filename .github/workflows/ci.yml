@@ -49,6 +49,10 @@ jobs:
         run: npm run check:themes
 
       - name: Tools smoke check
+        # Windows 的默认 shell 是 pwsh，它把 /dev/null 当成真实文件路径
+        # （C:\dev\null）而不是空设备，重定向会直接以 DirectoryNotFoundException 失败。
+        # 显式用 bash，让这段重定向在三个平台上语义一致。
+        shell: bash
         run: |
           node tools/flac-auto-metadata.cjs --help > /dev/null
           node tools/metadata-audit.cjs --help > /dev/null

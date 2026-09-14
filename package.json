@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.cjs",
-    "test": "node --test tests/",
+    "test": "node --test",
     "start:lan": "node lan-server.cjs",
     "check:syntax": "node tools/check-syntax.cjs",
     "check:static": "node tools/check-static-contract.cjs",

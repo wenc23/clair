@@ -153,7 +153,7 @@ for (const [theme, block] of themeBlocks) {
   } else {
     mechanisms.push(mechanism[1]);
   }
-  const recipe = block.match(/--panel-recipe:([\s\S]*?);\n/);
+  const recipe = block.match(/--panel-recipe:([\s\S]*?);\r?\n/);
   if (!recipe) report(`${theme}: 主题块必须声明 --panel-recipe`);
   else recipes.push(recipe[1].replace(/\s+/g, " ").trim());
 }

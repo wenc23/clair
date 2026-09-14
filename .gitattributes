@@ -1,0 +1,7 @@
+# 统一工作区换行符：任何平台检出都是 LF。
+#
+# 不写这一条时，Windows 上 core.autocrlf=true（Git for Windows 默认值）会把检出的
+# 文本文件转成 CRLF。tests/ 与 tools/ 里按 ";\n" 解析 styles.css 的正则会因此静默
+# 失配，表现为 windows job 上一条看不懂的断言失败（CI 曾真的这样挂过）。
+# 钉成 LF 之后，Linux / Windows 看到的字节完全一致，本地与 CI 结果也就一致了。
+* text=auto eol=lf
