@@ -1,6 +1,9 @@
 #include "desktopsettings.h"
 #include "librarymodel.h"
 #include "lyricsservice.h"
+#include "fingerprintservice.h"
+#include "transcriptionservice.h"
+#include "thememanager.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -16,6 +19,9 @@ int main(int argc, char *argv[])
 
     LibraryModel library;
     LyricsService lyrics;
+    FingerprintService fingerprint;
+    TranscriptionService transcription;
+    ThemeManager theme;
     DesktopSettings settings;
     QObject::connect(&library, &LibraryModel::rootDirectoryChanged, &settings,
                      [&library, &settings] { settings.setLastLibraryFolder(library.rootDirectory()); });
@@ -31,6 +37,9 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("library", &library);
     engine.rootContext()->setContextProperty("lyrics", &lyrics);
+    engine.rootContext()->setContextProperty("fingerprint", &fingerprint);
+    engine.rootContext()->setContextProperty("transcription", &transcription);
+    engine.rootContext()->setContextProperty("themeManager", &theme);
     engine.rootContext()->setContextProperty("desktopSettings", &settings);
     engine.loadFromModule("Clair", "Main");
     if (engine.rootObjects().isEmpty())
@@ -41,6 +50,16 @@ int main(int argc, char *argv[])
     if (screenshotArg >= 0 && screenshotArg + 1 < arguments.size()) {
         const QString path = arguments.at(screenshotArg + 1);
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QTimer::singleShot(800, &app, [window, path, &app] {
+            app.exit(window && window->grabWindow().save(path) ? 0 : 2);
+        });
+    }
+    const int themeScreenshotArg = arguments.indexOf("--screenshot-theme");
+    if (themeScreenshotArg >= 0 && themeScreenshotArg + 1 < arguments.size()) {
+        const QString path = arguments.at(themeScreenshotArg + 1);
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        if (auto *dialog = window ? window->findChild<QObject *>("themeEditor") : nullptr)
+            QMetaObject::invokeMethod(dialog, "open");
         QTimer::singleShot(800, &app, [window, path, &app] {
             app.exit(window && window->grabWindow().save(path) ? 0 : 2);
         });

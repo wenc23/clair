@@ -24,3 +24,7 @@ desktop/cmake-build-*/
 
 # 主题视觉回归截图（本地用无头 Chrome 生成，不入库）
 .preview/
+
+# Python helper bytecode
+__pycache__/
+*.pyc

@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Linux Qt runtime prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1
       - uses: jurplel/install-qt-action@v4
         with:
           version: "6.8.3"
@@ -41,3 +41,5 @@ jobs:
         run: cmake --build desktop/build --config Release --parallel 2
       - name: Test
         run: ctest --test-dir desktop/build -C Release --output-on-failure
+      - name: Install native bundle
+        run: cmake --install desktop/build --config Release --prefix desktop/install

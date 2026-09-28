@@ -9,6 +9,7 @@ class LyricsServiceTest final : public QObject {
     Q_OBJECT
 private slots:
     void loadsMatchingLocalLrcAndManualFile();
+    void searchesLrclibWhenRequested();
 };
 
 void LyricsServiceTest::loadsMatchingLocalLrcAndManualFile()
@@ -32,6 +33,23 @@ void LyricsServiceTest::loadsMatchingLocalLrcAndManualFile()
     QCOMPARE(lyrics.lineAtPosition(2000), QStringLiteral("second"));
     lyrics.loadForTrack({});
     QCOMPARE(lyrics.lines().size(), 0);
+}
+
+void LyricsServiceTest::searchesLrclibWhenRequested()
+{
+    if (qEnvironmentVariableIsEmpty("CLAIR_TEST_LRCLIB"))
+        QSKIP("Set CLAIR_TEST_LRCLIB=1 to run the network integration test.");
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    QFile audio(QDir(temporary.path()).filePath("Yesterday.mp3"));
+    QVERIFY(audio.open(QIODevice::WriteOnly));
+    audio.close();
+    LyricsService lyrics;
+    lyrics.loadForTrack(QUrl::fromLocalFile(audio.fileName()));
+    lyrics.search("Yesterday", "The Beatles");
+    QTRY_VERIFY_WITH_TIMEOUT(!lyrics.candidates().isEmpty() ||
+                             !lyrics.status().contains(QStringLiteral("正在搜索")), 20000);
+    QVERIFY2(!lyrics.candidates().isEmpty(), qPrintable(lyrics.status()));
 }
 
 QTEST_GUILESS_MAIN(LyricsServiceTest)

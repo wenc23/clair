@@ -103,6 +103,14 @@ void LyricsService::search(const QString &title, const QString &artist)
         if (requestedPath != m_trackPath) return;
         m_candidates.clear();
         m_candidateLyrics.clear();
+        const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (httpStatus == 429) {
+            const QString retry = QString::fromLatin1(reply->rawHeader("Retry-After"));
+            setStatus(retry.isEmpty() ? QStringLiteral("LRCLIB 请求过于频繁，请稍后重试。")
+                                      : QStringLiteral("LRCLIB 请求过于频繁，请 %1 秒后重试。").arg(retry));
+            emit candidatesChanged();
+            return;
+        }
         if (reply->error() != QNetworkReply::NoError) {
             setStatus(QStringLiteral("歌词搜索失败：") + reply->errorString());
             emit candidatesChanged();

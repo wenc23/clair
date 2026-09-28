@@ -34,7 +34,16 @@ try {
 
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE') -Destination (Join-Path $outputFull 'LICENSE-Clair-MIT.txt')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'PREVIEW_README.md') -Destination (Join-Path $outputFull 'README-试用.md')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THEMES.md') -Destination (Join-Path $outputFull 'THEMES.md')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'TRANSCRIPTION.md') -Destination (Join-Path $outputFull 'TRANSCRIPTION.md')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') -Destination $outputFull
+$skillSource = Join-Path $PSScriptRoot '..\.codex\skills\clair-theme-crop'
+if (Test-Path -LiteralPath $skillSource -PathType Container) {
+    $skillOut = Join-Path $outputFull 'theme-skill'
+    New-Item -ItemType Directory -Path (Join-Path $skillOut 'scripts') | Out-Null
+    Copy-Item -LiteralPath (Join-Path $skillSource 'SKILL.md') -Destination $skillOut
+    Copy-Item -LiteralPath (Join-Path $skillSource 'scripts\crop_theme.py') -Destination (Join-Path $skillOut 'scripts')
+}
 $webOut = Join-Path $outputFull 'web'
 New-Item -ItemType Directory -Path $webOut | Out-Null
 foreach ($name in @('index.html', 'styles.css', 'app.js', 'flac-metadata.js', 'library-model.js', 'theme-model.js')) {

@@ -14,6 +14,16 @@ ApplicationWindow {
     minimumHeight: 520
     title: "Clair Desktop"
     color: "#11141b"
+    background: Rectangle {
+        color: "#11141b"
+        Image {
+            anchors.fill: parent
+            source: themeManager.backgroundUrl
+            fillMode: Image.PreserveAspectCrop
+            cache: false
+            opacity: 0.28
+        }
+    }
     Material.theme: Material.Dark
     Material.accent: "#d9a980"
 
@@ -24,6 +34,9 @@ ApplicationWindow {
     property var groupNames: ["全部曲目"]
     property var visibleTracks: []
     property bool lyricsPage: false
+    property string transcriptionTarget: ""
+
+    ThemeEditor { id: themeEditor }
 
     function formatTime(milliseconds) {
         const seconds = Math.floor(Math.max(0, milliseconds) / 1000)
@@ -33,6 +46,7 @@ ApplicationWindow {
     function playIndex(index) {
         if (index < 0 || index >= library.count)
             return
+        fingerprint.cancel()
         selectedIndex = index
         player.source = library.sourceAt(index)
         lyrics.loadForTrack(player.source)
@@ -106,6 +120,130 @@ ApplicationWindow {
         onAccepted: lyrics.importLrc(selectedFile)
     }
 
+    FileDialog {
+        id: ffmpegDialog
+        title: "选择 FFmpeg 可执行文件"
+        onAccepted: transcription.ffmpegExecutable = selectedFile
+    }
+    FileDialog {
+        id: whisperDialog
+        title: "选择 whisper.cpp 的 whisper-cli 可执行文件"
+        onAccepted: transcription.whisperExecutable = selectedFile
+    }
+    FileDialog {
+        id: modelDialog
+        title: "选择兼容的多语种 ggml 模型"
+        onAccepted: transcription.modelFile = selectedFile
+    }
+
+    Dialog {
+        id: fingerprintDialog
+        title: "通过音频指纹匹配歌名"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(window.width - 70, 620)
+        height: Math.min(window.height - 80, 500)
+        standardButtons: Dialog.Close
+        ColumnLayout {
+            anchors.fill: parent
+            Label {
+                Layout.fillWidth: true
+                text: "仅在点击匹配后上传音频指纹与时长，不上传原音频；结果需你确认。"
+                wrapMode: Text.Wrap
+            }
+            TextField {
+                id: fpcalcPath
+                Layout.fillWidth: true
+                text: fingerprint.fpcalcExecutable
+                placeholderText: "fpcalc，或其可执行文件的绝对路径"
+                onEditingFinished: fingerprint.fpcalcExecutable = text.trim()
+            }
+            TextField {
+                id: acoustidKey
+                Layout.fillWidth: true
+                echoMode: TextInput.Password
+                placeholderText: "你的 AcoustID API key（不会保存）"
+            }
+            RowLayout {
+                Button {
+                    text: "开始匹配"
+                    enabled: selectedIndex >= 0 && !fingerprint.busy
+                    onClicked: {
+                        fingerprint.fpcalcExecutable = fpcalcPath.text.trim()
+                        const key = acoustidKey.text
+                        acoustidKey.text = ""
+                        fingerprint.identify(library.sourceAt(selectedIndex), key)
+                    }
+                }
+                Button { text: "取消"; enabled: fingerprint.busy; onClicked: fingerprint.cancel() }
+                Label { Layout.fillWidth: true; text: fingerprint.status; wrapMode: Text.Wrap; color: "#aab0b9" }
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                ListView {
+                    model: fingerprint.candidates
+                    spacing: 4
+                    delegate: Button {
+                        required property int index
+                        required property var modelData
+                        width: ListView.view.width
+                        text: modelData.title + " — " + modelData.artist + "  (" + Math.round(modelData.score * 100) + "%)"
+                        onClicked: {
+                            fingerprint.chooseCandidate(index)
+                            fingerprintDialog.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: transcriptionDialog
+        title: "可选离线歌词转写"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(window.width - 70, 660)
+        standardButtons: Dialog.Close
+        ColumnLayout {
+            width: transcriptionDialog.width - 40
+            Label {
+                Layout.fillWidth: true
+                text: "用本机 FFmpeg + whisper.cpp 生成待校对 LRC 草稿。不上传音频；首次需自行提供程序和模型。"
+                wrapMode: Text.Wrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { Layout.fillWidth: true; text: transcription.ffmpegExecutable.toString() || "尚未选 FFmpeg"; elide: Text.ElideMiddle }
+                Button { text: "选 FFmpeg"; onClicked: ffmpegDialog.open() }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { Layout.fillWidth: true; text: transcription.whisperExecutable.toString() || "尚未选 whisper-cli"; elide: Text.ElideMiddle }
+                Button { text: "选 whisper-cli"; onClicked: whisperDialog.open() }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { Layout.fillWidth: true; text: transcription.modelFile.toString() || "尚未选 ggml 模型"; elide: Text.ElideMiddle }
+                Button { text: "选模型"; onClicked: modelDialog.open() }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    text: "开始转写"
+                    enabled: selectedIndex >= 0 && !transcription.busy
+                    onClicked: {
+                        window.transcriptionTarget = library.sourceAt(selectedIndex).toString()
+                        transcription.transcribe(library.sourceAt(selectedIndex))
+                    }
+                }
+                Button { text: "取消任务"; enabled: transcription.busy; onClicked: transcription.cancel() }
+            }
+            Label { Layout.fillWidth: true; text: transcription.status; wrapMode: Text.Wrap; color: "#aab0b9" }
+        }
+    }
+
     Dialog {
         id: sourceDialog
         title: "已记录的音乐来源"
@@ -156,6 +294,7 @@ ApplicationWindow {
         ColumnLayout {
             width: 430
             Label { text: "编辑显示信息：仅保存在 Clair，不修改音频标签。"; wrapMode: Text.Wrap }
+            Button { text: "按音频指纹匹配歌名…"; onClicked: fingerprintDialog.open() }
             TextField { id: titleField; Layout.fillWidth: true; placeholderText: "歌名" }
             TextField { id: artistField; Layout.fillWidth: true; placeholderText: "歌手" }
             Label { text: "可选：修改磁盘文件名（不含扩展名，先停止播放）"; wrapMode: Text.Wrap }
@@ -210,10 +349,30 @@ ApplicationWindow {
         target: library
         function onScanStarted() {
             player.stop()
+            fingerprint.cancel()
             window.selectedIndex = -1
             lyrics.loadForTrack("")
         }
         function onCountChanged() { window.rebuildGroups() }
+    }
+    Connections {
+        target: fingerprint
+        function onProposalSelected(audio, title, artist) {
+            if (window.selectedIndex >= 0 &&
+                audio.toString() === library.sourceAt(window.selectedIndex).toString() &&
+                library.editTrack(window.selectedIndex, title, artist))
+                window.rebuildGroups()
+        }
+    }
+    Connections {
+        target: transcription
+        function onCompleted(lrcFile, fromCache) {
+            if (window.selectedIndex >= 0 &&
+                window.transcriptionTarget === library.sourceAt(window.selectedIndex).toString()) {
+                lyrics.importLrc(lrcFile)
+                window.lyricsPage = true
+            }
+        }
     }
 
     Window {
@@ -257,6 +416,7 @@ ApplicationWindow {
             }
             Button { text: "导入文件"; enabled: !library.loading; onClicked: audioDialog.open() }
             Button { text: "管理来源"; onClicked: sourceDialog.open() }
+            Button { text: "主题设计"; onClicked: themeEditor.open() }
             Button {
                 text: "打开 Web 版"
                 onClicked: desktopSettings.openWebVersion()
@@ -309,6 +469,17 @@ ApplicationWindow {
             radius: 12
             color: "#171c24"
             border.color: "#303946"
+
+            Image {
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.right: parent.right
+                width: 150
+                source: themeManager.sidebarUrl
+                fillMode: Image.PreserveAspectCrop
+                cache: false
+                opacity: 0.14
+            }
 
             RowLayout {
                 anchors.left: parent.left
@@ -394,6 +565,7 @@ ApplicationWindow {
                     Label { Layout.fillWidth: true; text: lyrics.status; wrapMode: Text.Wrap; color: "#aab0b9" }
                     Button { text: "导入 LRC"; enabled: selectedIndex >= 0; onClicked: lrcDialog.open() }
                     Button { text: "搜索歌词"; enabled: selectedIndex >= 0; onClicked: lyrics.search(library.titleAt(selectedIndex), library.artistAt(selectedIndex)) }
+                    Button { text: "离线转写"; enabled: selectedIndex >= 0; onClicked: transcriptionDialog.open() }
                     Button { text: floatingLyrics.visible ? "关闭浮窗" : "歌词浮窗"; onClicked: floatingLyrics.visible = !floatingLyrics.visible }
                 }
                 ScrollView {
@@ -442,6 +614,17 @@ ApplicationWindow {
             radius: 12
             color: "#202631"
             border.color: "#303946"
+
+            Image {
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left
+                width: 146
+                source: themeManager.coverUrl
+                fillMode: Image.PreserveAspectCrop
+                cache: false
+                opacity: 0.16
+            }
 
             ColumnLayout {
                 anchors.fill: parent
