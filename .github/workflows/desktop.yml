@@ -1,0 +1,43 @@
+name: Desktop
+
+on:
+  push:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: win64_msvc2022_64
+          - os: macos-latest
+            arch: clang_64
+          - os: ubuntu-latest
+            arch: linux_gcc_64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux Qt runtime prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: ${{ matrix.arch }}
+          modules: "qtmultimedia"
+          cache: true
+      - name: Configure
+        run: cmake -S desktop -B desktop/build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build desktop/build --config Release --parallel 2
+      - name: Test
+        run: ctest --test-dir desktop/build -C Release --output-on-failure
