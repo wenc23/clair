@@ -4,6 +4,8 @@
 #include <QSettings>
 #include <QUrl>
 
+#include "webserver.h"
+
 class DesktopSettings final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString webUrl READ webUrl WRITE setWebUrl NOTIFY webUrlChanged)
@@ -16,9 +18,11 @@ public:
     QString webUrl() const;
     void setWebUrl(const QString &url);
     QUrl lastLibraryFolder() const;
+    QStringList importedFiles() const;
     QString errorString() const { return m_errorString; }
 
     Q_INVOKABLE void setLastLibraryFolder(const QString &path);
+    void setImportedFiles(const QStringList &paths);
     Q_INVOKABLE void openWebVersion();
 
 signals:
@@ -30,5 +34,6 @@ private:
     void setErrorString(const QString &error);
 
     QSettings m_settings;
+    WebServer m_webServer;
     QString m_errorString;
 };

@@ -27,6 +27,7 @@ private slots:
     void scansUnicodePathsAndIgnoresStaleIndexEntry();
     void clearsOldTracksWhileSwitchingFolders();
     void rejectsInvalidFolder();
+    void importsArbitraryFilesAndEditsTitles();
 };
 
 void LibraryModelTest::scansGeneralMusicAndReadsLegacyIndexWithoutWriting()
@@ -118,6 +119,43 @@ void LibraryModelTest::clearsOldTracksWhileSwitchingFolders()
     QVERIFY(model.sourceAt(0).isEmpty());
     QTRY_VERIFY_WITH_TIMEOUT(!model.loading(), 5000);
     QCOMPARE(model.titleAt(0), "new");
+}
+
+void LibraryModelTest::importsArbitraryFilesAndEditsTitles()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    QDir root(temporary.path());
+    QVERIFY(root.mkpath("A"));
+    QVERIFY(root.mkpath("B"));
+    const QString first = root.filePath("A/one.mp3");
+    const QString second = root.filePath("B/two.wav");
+    QVERIFY(writeFile(first));
+    QVERIFY(writeFile(second));
+
+    LibraryModel model;
+    model.addFiles({QUrl::fromLocalFile(first), QUrl::fromLocalFile(second)});
+    QTRY_VERIFY_WITH_TIMEOUT(!model.loading(), 5000);
+    QCOMPARE(model.count(), 2);
+    QCOMPARE(model.importedFiles().size(), 2);
+    QCOMPARE(model.groupAt(0, QStringLiteral("文件夹")), QFileInfo(first).dir().absolutePath());
+    QVERIFY(model.editTrack(0, "Better name", "Better artist"));
+    QCOMPARE(model.titleAt(0), "Better name");
+    QCOMPARE(model.artistAt(0), "Better artist");
+
+    LibraryModel restored;
+    restored.restoreSources({}, model.importedFiles());
+    QTRY_VERIFY_WITH_TIMEOUT(!restored.loading(), 5000);
+    QCOMPARE(restored.titleAt(0), "Better name");
+    QVERIFY(restored.renameTrackFile(0, "renamed"));
+    QVERIFY(QFileInfo::exists(root.filePath("A/renamed.mp3")));
+    QVERIFY(!QFileInfo::exists(first));
+    QCOMPARE(restored.titleAt(0), "renamed");
+    QVERIFY(!restored.renameTrackFile(0, "../escape"));
+    QCOMPARE(restored.count(), 2);
+    restored.removeImportedFile(restored.importedFiles().first());
+    QTRY_VERIFY_WITH_TIMEOUT(!restored.loading(), 5000);
+    QCOMPARE(restored.count(), 1);
 }
 
 QTEST_GUILESS_MAIN(LibraryModelTest)

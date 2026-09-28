@@ -3,6 +3,7 @@
 #include <QAbstractListModel>
 #include <QFutureWatcher>
 #include <QUrl>
+#include <QVariantList>
 #include <QVector>
 
 struct ClairTrack {
@@ -22,6 +23,8 @@ class LibraryModel final : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     Q_PROPERTY(QString rootDirectory READ rootDirectory NOTIFY rootDirectoryChanged)
+    Q_PROPERTY(QStringList importedFiles READ importedFiles NOTIFY importedFilesChanged)
+    Q_PROPERTY(QString sourceSummary READ sourceSummary NOTIFY sourcesChanged)
     Q_PROPERTY(QString errorString READ errorString NOTIFY errorStringChanged)
     Q_PROPERTY(int count READ count NOTIFY countChanged)
 
@@ -42,27 +45,44 @@ public:
 
     bool loading() const { return m_loading; }
     QString rootDirectory() const { return m_rootDirectory; }
+    QStringList importedFiles() const { return m_importedFiles; }
+    QString sourceSummary() const;
     QString errorString() const { return m_errorString; }
     int count() const { return m_tracks.size(); }
 
     Q_INVOKABLE void openFolder(const QUrl &folder);
+    Q_INVOKABLE void addFiles(const QVariantList &files);
+    Q_INVOKABLE void removeImportedFile(const QString &path);
+    Q_INVOKABLE void clearFolder();
+    void restoreSources(const QUrl &folder, const QStringList &files);
     Q_INVOKABLE QUrl sourceAt(int index) const;
     Q_INVOKABLE QString titleAt(int index) const;
+    Q_INVOKABLE QString artistAt(int index) const;
+    Q_INVOKABLE QString albumAt(int index) const;
+    Q_INVOKABLE QString groupAt(int index, const QString &kind) const;
+    Q_INVOKABLE bool editTrack(int index, const QString &title, const QString &artist);
+    Q_INVOKABLE bool renameTrackFile(int index, const QString &baseName);
 
 signals:
     void scanStarted();
     void loadingChanged();
     void rootDirectoryChanged();
+    void importedFilesChanged();
+    void sourcesChanged();
     void errorStringChanged();
     void countChanged();
 
 private:
-    static ClairScanResult scanFolder(const QString &rootPath);
+    static ClairScanResult scanSources(const QString &rootPath, const QStringList &extraFiles);
+    void reload();
     void setErrorString(const QString &error);
+    void saveOverride(const ClairTrack &track);
+    void applyOverrides();
 
     QVector<ClairTrack> m_tracks;
     QFutureWatcher<ClairScanResult> m_watcher;
     QString m_rootDirectory;
+    QStringList m_importedFiles;
     QString m_errorString;
     bool m_loading = false;
 };

@@ -35,6 +35,11 @@ try {
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\LICENSE') -Destination (Join-Path $outputFull 'LICENSE-Clair-MIT.txt')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'PREVIEW_README.md') -Destination (Join-Path $outputFull 'README-试用.md')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') -Destination $outputFull
+$webOut = Join-Path $outputFull 'web'
+New-Item -ItemType Directory -Path $webOut | Out-Null
+foreach ($name in @('index.html', 'styles.css', 'app.js', 'flac-metadata.js', 'library-model.js', 'theme-model.js')) {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\$name") -Destination $webOut
+}
 $licenseOut = Join-Path $outputFull 'licenses'
 New-Item -ItemType Directory -Path $licenseOut | Out-Null
 Copy-Item -Path (Join-Path $PSScriptRoot 'licenses\*.txt') -Destination $licenseOut

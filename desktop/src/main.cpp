@@ -1,5 +1,6 @@
 #include "desktopsettings.h"
 #include "librarymodel.h"
+#include "lyricsservice.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -14,16 +15,22 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("Clair Desktop");
 
     LibraryModel library;
+    LyricsService lyrics;
     DesktopSettings settings;
     QObject::connect(&library, &LibraryModel::rootDirectoryChanged, &settings,
                      [&library, &settings] { settings.setLastLibraryFolder(library.rootDirectory()); });
+    QObject::connect(&library, &LibraryModel::importedFilesChanged, &settings,
+                     [&library, &settings] { settings.setImportedFiles(library.importedFiles()); });
     const QStringList arguments = app.arguments();
     const int libraryArg = arguments.indexOf("--library");
     if (libraryArg >= 0 && libraryArg + 1 < arguments.size())
-        library.openFolder(QUrl::fromLocalFile(arguments.at(libraryArg + 1)));
+        library.restoreSources(QUrl::fromLocalFile(arguments.at(libraryArg + 1)), settings.importedFiles());
+    else
+        library.restoreSources(settings.lastLibraryFolder(), settings.importedFiles());
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("library", &library);
+    engine.rootContext()->setContextProperty("lyrics", &lyrics);
     engine.rootContext()->setContextProperty("desktopSettings", &settings);
     engine.loadFromModule("Clair", "Main");
     if (engine.rootObjects().isEmpty())

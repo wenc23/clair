@@ -10,7 +10,7 @@ DesktopSettings::DesktopSettings(QObject *parent)
 
 QString DesktopSettings::webUrl() const
 {
-    return m_settings.value("webUrl", "http://127.0.0.1:8000").toString();
+    return m_settings.value("webUrl", "").toString();
 }
 
 void DesktopSettings::setWebUrl(const QString &url)
@@ -27,6 +27,11 @@ QUrl DesktopSettings::lastLibraryFolder() const
     return path.isEmpty() ? QUrl() : QUrl::fromLocalFile(path);
 }
 
+QStringList DesktopSettings::importedFiles() const
+{
+    return m_settings.value("importedFiles").toStringList();
+}
+
 void DesktopSettings::setLastLibraryFolder(const QString &path)
 {
     if (m_settings.value("lastLibraryFolder").toString() == path)
@@ -35,9 +40,30 @@ void DesktopSettings::setLastLibraryFolder(const QString &path)
     emit lastLibraryFolderChanged();
 }
 
+void DesktopSettings::setImportedFiles(const QStringList &paths)
+{
+    m_settings.setValue("importedFiles", paths);
+}
+
 void DesktopSettings::openWebVersion()
 {
-    const QUrl url(webUrl());
+    const QString configured = webUrl().trimmed();
+    // Older previews defaulted to port 8000 without starting a server.
+    // Treat that obsolete default as the bundled Web mode during migration.
+    if (configured.isEmpty() || configured == "http://127.0.0.1:8000" ||
+        configured == "http://127.0.0.1:8000/") {
+        if (!m_webServer.start()) {
+            setErrorString(m_webServer.errorString());
+            return;
+        }
+        if (!QDesktopServices::openUrl(m_webServer.url())) {
+            setErrorString(QStringLiteral("无法打开默认浏览器。"));
+            return;
+        }
+        setErrorString({});
+        return;
+    }
+    const QUrl url(configured);
     if (!url.isValid() || (url.scheme() != "http" && url.scheme() != "https") || url.host().isEmpty()) {
         setErrorString(QStringLiteral("Web 地址必须是有效的 http:// 或 https:// 地址。"));
         return;

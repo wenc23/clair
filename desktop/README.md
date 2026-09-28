@@ -1,10 +1,10 @@
 # Clair Desktop（首个原生纵向切片）
 
-这是与现有 Web 版并存的 Qt 6 桌面应用。选择目录、只读扫描和播放均在本地完成，不需要 Node.js、浏览器、WebView 或 HTTP 服务。“打开 Web 版”仅在系统默认浏览器打开配置地址；如需使用该入口，请另行启动现有 Web 服务。
+这是与现有 Web 版并存的 Qt 6 桌面应用。扫描、曲库及播放均在本地完成，不需要 Node.js、浏览器、WebView 或 HTTP 服务。“打开 Web 版”默认启动仅监听本机的轻量静态页面入口；原生播放不经过该入口。
 
 ## 构建
 
-要求 CMake 3.21+、C++17 编译器、Qt 6.8+（Quick、Quick Controls 2、Multimedia、Concurrent、Test）及 Qt 对应平台的部署/编解码运行库。
+要求 CMake 3.21+、C++17 编译器、Qt 6.8+（Quick、Quick Controls 2、Multimedia、Concurrent、Network、Test）及 Qt 对应平台的部署/编解码运行库。
 
 ```sh
 cmake -S desktop -B desktop/build -DCMAKE_BUILD_TYPE=Release
@@ -20,11 +20,13 @@ Windows + Qt 6.8.3 MinGW 的 `qmlimportscanner` 在含非 ASCII 字符的源码�
 
 - 异步扫描 FLAC、MP3、WAV 文件；自动跳过 `.Clair`、`.Clair 回收站`、符号链接与 junction。格式解码和输出设备仍须逐平台实测。
 - 将现有 `.Clair/library.json` schema v1 作为**只读、可能滞后**的标题/艺术家/专辑来源；缺失时用文件名与目录名回退，任何流派均可导入。
-- 基础播放、暂停、上一首/下一首、进度与音量；最近使用的目录和 Web 地址存于操作系统用户设置区，而非曲库目录。
-- Web 入口默认指向 `http://127.0.0.1:8000`，可在应用设置中修改；Web 服务停机不影响桌面端。
+- 文件夹和任意位置的单独文件导入，记录来源；显示歌名/歌手覆盖及用户显式触发的磁盘文件重命名。
+- 本地 LRC、手动导入、LRCLIB 候选搜索、歌词页和置顶浮窗。
+- 分组浏览，以及顺序、列表循环、单曲循环、组内随机；上一首/下一首、进度与音量。
+- Web 入口默认使用包内只读静态页面；自定义地址可在 Web 设置中修改。其生命周期和数据与原生播放分离。
 
 ## 尚未声称支持
 
-首版未实现 Web 端的标签写入、收藏同步、均衡器、频谱、无缝播放、回收站、LAN 模式、主题图片组、歌词浮窗及自动歌词转写。Qt Multimedia 的格式支持和 FFmpeg 部署须在每个目标操作系统验证。路线与歌词效能方案见 [原生桌面端设计](../docs/native-desktop.md)。
+当前仍未实现 Web 端的标签写入、收藏同步、均衡器、频谱、无缝播放、回收站、LAN 模式、主题图片组与裁剪、音频指纹歌名匹配及自动歌词转写。Qt Multimedia 的格式支持和 FFmpeg 部署须在每个目标操作系统验证。路线与歌词效能方案见 [原生桌面端设计](../docs/native-desktop.md)。
 
 测试目录中的 `tone.wav`、`tone.flac`、`tone.mp3` 是由 440 Hz 正弦波生成的原创短样本，用于验证三种格式能被当前 Qt 后端读取。若本机有音频输出设备，可设置 `CLAIR_TEST_AUDIO_OUTPUT=1` 再运行测试，附加检查 WAV 播放进度确实推进；CI 默认跳过该设备相关检查。

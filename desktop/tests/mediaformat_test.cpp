@@ -11,6 +11,7 @@ private slots:
     void decodesFixture_data();
     void decodesFixture();
     void playsWavWithAudioOutputWhenRequested();
+    void decodesExternalSampleWhenRequested();
 };
 
 void MediaFormatTest::decodesFixture_data()
@@ -48,6 +49,19 @@ void MediaFormatTest::playsWavWithAudioOutputWhenRequested()
     QTRY_VERIFY_WITH_TIMEOUT(player.position() > 0 || player.error() != QMediaPlayer::NoError, 5000);
     QCOMPARE(player.error(), QMediaPlayer::NoError);
     QVERIFY(player.position() > 0);
+}
+
+void MediaFormatTest::decodesExternalSampleWhenRequested()
+{
+    const QString path = qEnvironmentVariable("CLAIR_TEST_AUDIO_FILE");
+    if (path.isEmpty()) QSKIP("Set CLAIR_TEST_AUDIO_FILE to check a user-provided audio file.");
+    QVERIFY2(QFile::exists(path), qPrintable(path));
+    QMediaPlayer player;
+    player.setSource(QUrl::fromLocalFile(path));
+    QTRY_VERIFY_WITH_TIMEOUT(player.duration() > 0 || player.error() != QMediaPlayer::NoError, 10000);
+    QCOMPARE(player.error(), QMediaPlayer::NoError);
+    QVERIFY(player.duration() > 0);
+    qInfo() << "External sample duration (ms):" << player.duration();
 }
 
 QTEST_GUILESS_MAIN(MediaFormatTest)
