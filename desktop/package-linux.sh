@@ -17,7 +17,7 @@ if [[ -e "$output" || -e "${output}.sha256" ]]; then
   exit 2
 fi
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-name=Clair-Desktop-Linux-x64-Preview-0.3.6
+name=Clair-Desktop-Linux-x64-Preview-0.3.7
 stage=$(mktemp -d "${TMPDIR:-/tmp}/clair-linux-package.XXXXXX")
 cleanup() {
   if [[ "$stage" == "${TMPDIR:-/tmp}/clair-linux-package."* ]]; then

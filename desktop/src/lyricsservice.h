@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QNetworkAccessManager>
+#include <QHash>
 #include <QVariantList>
 
 #include "lyricsparser.h"
@@ -20,8 +21,10 @@ public:
     QVariantList candidates() const { return m_candidates; }
     Q_INVOKABLE void loadForTrack(const QUrl &audio);
     Q_INVOKABLE void importLrc(const QUrl &file);
-    Q_INVOKABLE void search(const QString &title, const QString &artist);
+    Q_INVOKABLE void search(const QString &title, const QString &artist, qint64 durationMs = 0);
     Q_INVOKABLE void chooseCandidate(int index);
+    Q_INVOKABLE bool adjustLineTime(int sourceIndex, qint64 timeMs);
+    Q_INVOKABLE bool resetLineTime(int sourceIndex);
     Q_INVOKABLE QString lineAtPosition(qint64 positionMs) const;
     Q_INVOKABLE int lineIndexAtPosition(qint64 positionMs) const;
 signals:
@@ -32,12 +35,21 @@ private:
     void loadText(const QByteArray &bytes, const QString &origin);
     void setStatus(const QString &status);
     QString keyForCurrentTrack() const;
+    void applyLineTimes();
+    bool saveLineTimes();
+    void requestSearch(const QString &title, const QString &artist, qint64 durationMs,
+                       bool broad, quint64 generation);
 
     QNetworkAccessManager m_network;
     QVector<LrcLine> m_lines;
+    QVector<LrcLine> m_originalLines;
+    QVector<int> m_sourceIndices;
+    QHash<int, qint64> m_lineTimes;
+    QString m_timingKey;
     QString m_plainText;
     QString m_trackPath;
     QString m_status;
     QVariantList m_candidates;
     QList<QByteArray> m_candidateLyrics;
+    quint64 m_searchGeneration = 0;
 };

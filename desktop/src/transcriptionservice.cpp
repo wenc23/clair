@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSaveFile>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
 
@@ -41,6 +42,22 @@ QByteArray fileIdentity(const QString &path)
     const QFileInfo info(path);
     return (info.canonicalFilePath() + QLatin1Char('\n') + QString::number(info.size())
             + QLatin1Char('\n') + QString::number(info.lastModified().toMSecsSinceEpoch())).toUtf8();
+}
+
+QString inferredLanguage(const QString &path)
+{
+    QString title = QFileInfo(path).completeBaseName();
+    const auto bracket = QRegularExpression(QStringLiteral("《([^》]+)》")).match(title);
+    if (bracket.hasMatch()) title = bracket.captured(1);
+    const int latin = title.count(QRegularExpression(QStringLiteral("[A-Za-z]")));
+    const int han = title.count(QRegularExpression(QStringLiteral("[\\x{4E00}-\\x{9FFF}]")));
+    const int kana = title.count(QRegularExpression(QStringLiteral("[\\x{3040}-\\x{30FF}]")));
+    const int hangul = title.count(QRegularExpression(QStringLiteral("[\\x{AC00}-\\x{D7AF}]")));
+    if (kana >= 2) return QStringLiteral("ja");
+    if (hangul >= 2) return QStringLiteral("ko");
+    if (han >= 3 && han >= latin) return QStringLiteral("zh");
+    if (latin >= 5 && latin >= 2 * (han + kana + hangul)) return QStringLiteral("en");
+    return QStringLiteral("auto");
 }
 }
 
@@ -155,7 +172,8 @@ bool TranscriptionService::validTool(const QString &path)
 
 QString TranscriptionService::cacheKey(const QString &audioPath) const
 {
-    QByteArray identity = "clair-whisper-lrc-v2-qt-decode\n";
+    QByteArray identity = "clair-whisper-lrc-v3-quality-check\n";
+    identity += m_language.toUtf8() + '\n';
     for (const QString &path : {audioPath, m_modelPath, m_whisperPath}) {
         identity += fileIdentity(path);
         identity += '\n';
@@ -163,7 +181,7 @@ QString TranscriptionService::cacheKey(const QString &audioPath) const
     return QString::fromLatin1(QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex());
 }
 
-void TranscriptionService::transcribe(const QUrl &audioFile)
+void TranscriptionService::transcribe(const QUrl &audioFile, const QString &language)
 {
     if (busy()) { setStatus(QStringLiteral("已有转写任务在运行，请先取消。")); return; }
     setResult({});
@@ -174,6 +192,14 @@ void TranscriptionService::transcribe(const QUrl &audioFile)
     if (!ready()) {
         setStatus(QStringLiteral("内置离线转写组件缺失。请解压完整试用包，或在高级设置中选择自定义识别工具和模型。")); return;
     }
+    const QString requestedLanguage = language.trimmed().toLower();
+    if (requestedLanguage != QStringLiteral("auto") && requestedLanguage != QStringLiteral("en") &&
+        requestedLanguage != QStringLiteral("zh") && requestedLanguage != QStringLiteral("ja") &&
+        requestedLanguage != QStringLiteral("ko")) {
+        setStatus(QStringLiteral("不支持的识别语言。")); return;
+    }
+    m_language = requestedLanguage == QStringLiteral("auto")
+                     ? inferredLanguage(audioPath) : requestedLanguage;
     const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
                              + QStringLiteral("/transcriptions");
     if (!QDir().mkpath(cacheDir)) { setStatus(QStringLiteral("无法创建转写缓存目录。")); return; }
@@ -181,9 +207,7 @@ void TranscriptionService::transcribe(const QUrl &audioFile)
     QFile cache(m_cachePath);
     if (cache.size() <= 5 * 1024 * 1024 && cache.open(QIODevice::ReadOnly)) {
         const auto lines = parseLrc(QString::fromUtf8(cache.readAll()));
-        if (std::any_of(lines.cbegin(), lines.cend(), [](const LrcLine &line) {
-                return !line.text.trimmed().isEmpty();
-            })) {
+        if (transcriptionQualityIssue(lines).isEmpty()) {
             setResult(QUrl::fromLocalFile(m_cachePath));
             setStatus(QStringLiteral("已加载离线转写缓存（待校对草稿）。"));
             emit completed(m_resultFile, true);
@@ -319,10 +343,11 @@ void TranscriptionService::startRecognition()
     }
     m_process.setProgram(m_whisperPath);
     m_errorTail.clear();
-    m_process.setArguments({"-m", m_modelPath, "-f", wav, "-l", "auto", "-olrc", "-of",
+    m_process.setArguments({"-m", m_modelPath, "-f", wav, "-l", m_language, "-olrc", "-of",
                             m_workspace->filePath("draft")});
     setPhase(Phase::Recognition);
-    setStatus(QStringLiteral("正在离线识别歌词；不会阻塞播放，可随时取消…"));
+    setStatus(QStringLiteral("正在离线识别歌词（语言：%1）；不会阻塞播放，可随时取消…")
+                  .arg(m_language));
     m_process.start();
 }
 
@@ -352,10 +377,10 @@ void TranscriptionService::processFinished(int exitCode, QProcess::ExitStatus ex
     draft.close();
     const auto lines = contents.size() <= 5 * 1024 * 1024
                            ? parseLrc(QString::fromUtf8(contents)) : QVector<LrcLine>();
-    if (!std::any_of(lines.cbegin(), lines.cend(), [](const LrcLine &line) {
-            return !line.text.trimmed().isEmpty();
-        })) {
-        fail(QStringLiteral("识别结果为空或格式无效；纯器乐、强伴奏也可能无法识别。")); return;
+    const QString qualityIssue = transcriptionQualityIssue(lines);
+    if (!qualityIssue.isEmpty()) {
+        fail(qualityIssue + QStringLiteral("。未保存为歌词；请先搜索现成 LRC，或改选歌曲语言后重试。"));
+        return;
     }
     QSaveFile cache(m_cachePath);
     if (!cache.open(QIODevice::WriteOnly) || cache.write(contents) != contents.size() || !cache.commit()) {

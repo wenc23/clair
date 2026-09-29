@@ -12,6 +12,7 @@ class ThemeManagerTest : public QObject {
     Q_OBJECT
 private slots:
     void importAndPersist();
+    void importsJpegAndBmpOriginals();
     void cropRejectsInvalidGeometry();
     void importPackRebuildsOutputsAndRejectsTraversal();
     void importsExternalSkillPackWhenRequested();
@@ -55,6 +56,26 @@ void ThemeManagerTest::importAndPersist()
     QVERIFY(reopened.removeTheme(id));
     QVERIFY(reopened.themeIds().isEmpty());
     QVERIFY(QFile::exists(path));
+}
+
+void ThemeManagerTest::importsJpegAndBmpOriginals()
+{
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    const QString jpeg = makeImage(temp.path(), "cover.jpg", Qt::yellow);
+    const QString bmp = makeImage(temp.path(), "sidebar.bmp", Qt::cyan);
+    QVERIFY(!jpeg.isEmpty());
+    QVERIFY(!bmp.isEmpty());
+    ThemeManager manager(QDir(temp.path()).filePath("themes"));
+    QVERIFY2(manager.createTheme("Mixed originals", {QUrl::fromLocalFile(jpeg),
+                                                    QUrl::fromLocalFile(bmp)}),
+             qPrintable(manager.errorString()));
+    const QDir saved(QDir(temp.path()).filePath("themes/" + manager.activeThemeId()));
+    QVERIFY(QFile::exists(saved.filePath("original-0.jpg")));
+    QVERIFY(QFile::exists(saved.filePath("original-1.bmp")));
+    QCOMPARE(QImage(manager.backgroundUrl().toLocalFile()).size(), QSize(1920, 1080));
+    QCOMPARE(QImage(manager.coverUrl().toLocalFile()).size(), QSize(600, 600));
+    QCOMPARE(QImage(manager.sidebarUrl().toLocalFile()).size(), QSize(480, 1080));
 }
 
 void ThemeManagerTest::cropRejectsInvalidGeometry()

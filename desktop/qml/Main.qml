@@ -46,6 +46,33 @@ ApplicationWindow {
         return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0")
     }
 
+    function formatLyricTime(milliseconds) {
+        const ms = Math.max(0, Math.floor(milliseconds))
+        const minutes = Math.floor(ms / 60000)
+        const seconds = Math.floor((ms % 60000) / 1000)
+        const centiseconds = Math.floor((ms % 1000) / 10)
+        return minutes + ":" + String(seconds).padStart(2, "0") + "." + String(centiseconds).padStart(2, "0")
+    }
+
+    function parseLyricTime(value) {
+        const match = /^(\d{1,3}):([0-5]\d)(?:\.(\d{1,2}))?$/.exec(value.trim())
+        if (!match) return -1
+        return Number(match[1]) * 60000 + Number(match[2]) * 1000
+               + Number((match[3] || "0").padEnd(2, "0")) * 10
+    }
+
+    function openLyricTiming(row) {
+        if (!row || row.sourceIndex === undefined) return
+        lineTimeDialog.sourceIndex = row.sourceIndex
+        lineTimeDialog.lyricText = row.text || "♪"
+        lineTimeDialog.errorText = ""
+        lyricTimeInput.text = formatLyricTime(row.timeMs)
+        window.show()
+        window.raise()
+        window.requestActivate()
+        lineTimeDialog.open()
+    }
+
     function playIndex(index, resumePosition) {
         if (index < 0 || index >= library.count)
             return
@@ -274,8 +301,25 @@ ApplicationWindow {
             width: transcriptionDialog.width - 40
             Label {
                 Layout.fillWidth: true
-                text: "点击开始即可用内置轻量模型生成 LRC 草稿，不上传音频。歌曲伴奏可能造成错词或漏词，请人工校对。"
+                text: "优先在歌词页搜索现成同步歌词。找不到时再用内置轻量模型转写；不上传音频，结果需人工校对。"
                 wrapMode: Text.Wrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "歌曲语言" }
+                ComboBox {
+                    id: transcriptionLanguage
+                    Layout.fillWidth: true
+                    textRole: "text"
+                    valueRole: "code"
+                    model: [
+                        { text: "自动按文件名推断（可手动改）", code: "auto" },
+                        { text: "英语", code: "en" },
+                        { text: "中文", code: "zh" },
+                        { text: "日语", code: "ja" },
+                        { text: "韩语", code: "ko" }
+                    ]
+                }
             }
             Label {
                 Layout.fillWidth: true
@@ -289,7 +333,7 @@ ApplicationWindow {
                     enabled: selectedIndex >= 0 && !transcription.busy && transcription.ready
                     onClicked: {
                         window.transcriptionTarget = library.sourceAt(selectedIndex).toString()
-                        transcription.transcribe(library.sourceAt(selectedIndex))
+                        transcription.transcribe(library.sourceAt(selectedIndex), transcriptionLanguage.currentValue)
                     }
                 }
                 Button { text: "取消任务"; enabled: transcription.busy; onClicked: transcription.cancel() }
@@ -315,6 +359,62 @@ ApplicationWindow {
                 visible: transcriptionDialog.advancedTools
                 text: "恢复内置组件"
                 onClicked: transcription.useBundledTools()
+            }
+        }
+    }
+
+    Dialog {
+        id: lineTimeDialog
+        property int sourceIndex: -1
+        property string lyricText: ""
+        property string errorText: ""
+        title: "调整这行歌词的时间"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(window.width - 60, 500)
+        standardButtons: Dialog.Close
+        ColumnLayout {
+            width: lineTimeDialog.width - 40
+            spacing: 10
+            Label { Layout.fillWidth: true; text: lineTimeDialog.lyricText; wrapMode: Text.Wrap; font.pixelSize: 18 }
+            Label { text: "这行开始出现的时间（分:秒.百分秒）"; color: "#aab0b9" }
+            RowLayout {
+                Layout.fillWidth: true
+                TextField { id: lyricTimeInput; Layout.fillWidth: true; placeholderText: "例如 1:23.45" }
+                Button {
+                    text: "填入当前播放位置"
+                    enabled: player.source.toString() !== ""
+                    onClicked: lyricTimeInput.text = window.formatLyricTime(player.position)
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: lineTimeDialog.errorText || "只调整这一行；如需调整其他行，分别右键对应歌词。原 LRC 不会被改写。"
+                color: lineTimeDialog.errorText ? "#ff8c82" : "#aab0b9"
+                wrapMode: Text.Wrap
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    text: "保存校时"
+                    onClicked: {
+                        const time = window.parseLyricTime(lyricTimeInput.text)
+                        if (time < 0) {
+                            lineTimeDialog.errorText = "请输入类似 1:23.45 的时间。"
+                        } else if (lyrics.adjustLineTime(lineTimeDialog.sourceIndex, time)) {
+                            lineTimeDialog.close()
+                        } else {
+                            lineTimeDialog.errorText = lyrics.status
+                        }
+                    }
+                }
+                Button {
+                    text: "恢复这一行原时间"
+                    onClicked: {
+                        if (lyrics.resetLineTime(lineTimeDialog.sourceIndex)) lineTimeDialog.close()
+                        else lineTimeDialog.errorText = lyrics.status
+                    }
+                }
             }
         }
     }
@@ -528,11 +628,19 @@ ApplicationWindow {
                 MouseArea {
                     anchors.fill: parent
                     enabled: !desktopSettings.lyricsOverlayLocked
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     hoverEnabled: true
                     cursorShape: Qt.SizeAllCursor
-                    onPressed: floatingLyrics.startSystemMove()
+                    onPressed: (mouse) => {
+                        if (mouse.button === Qt.RightButton) {
+                            const line = lyrics.lineIndexAtPosition(player.position)
+                            if (line >= 0) window.openLyricTiming(lyrics.lines[line])
+                        } else {
+                            floatingLyrics.startSystemMove()
+                        }
+                    }
                     ToolTip.visible: containsMouse
-                    ToolTip.text: "按住拖动歌词浮窗"
+                    ToolTip.text: "左键拖动浮窗；右键调整当前歌词时间"
                 }
             }
             RowLayout {
@@ -872,7 +980,12 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Label { Layout.fillWidth: true; text: lyrics.status; wrapMode: Text.Wrap; color: "#aab0b9" }
                     Button { text: "导入 LRC"; enabled: selectedIndex >= 0; onClicked: lrcDialog.open() }
-                    Button { text: "搜索歌词"; enabled: selectedIndex >= 0; onClicked: lyrics.search(library.titleAt(selectedIndex), library.artistAt(selectedIndex)) }
+                    Button {
+                        text: "搜索歌词"
+                        enabled: selectedIndex >= 0
+                        onClicked: lyrics.search(library.titleAt(selectedIndex),
+                                                library.artistAt(selectedIndex), player.duration)
+                    }
                     Button { text: "离线转写"; enabled: selectedIndex >= 0; onClicked: transcriptionDialog.open() }
                     Button { text: floatingLyrics.visible ? "关闭浮窗" : "歌词浮窗"; onClicked: floatingLyrics.visible = !floatingLyrics.visible }
                     Button {
@@ -916,6 +1029,12 @@ ApplicationWindow {
                                 horizontalAlignment: Text.AlignHCenter
                                 font.pixelSize: 19
                                 color: lyrics.lineIndexAtPosition(player.position) === index ? "#f6e8d9" : "#8c97a4"
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.RightButton
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: window.openLyricTiming(modelData)
+                                }
                             }
                         }
                         Label {

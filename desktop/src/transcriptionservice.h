@@ -34,7 +34,7 @@ public:
     void setWhisperExecutable(const QUrl &file);
     void setModelFile(const QUrl &file);
     Q_INVOKABLE void useBundledTools();
-    Q_INVOKABLE void transcribe(const QUrl &audioFile);
+    Q_INVOKABLE void transcribe(const QUrl &audioFile, const QString &language = QStringLiteral("auto"));
     Q_INVOKABLE void cancel();
 
 signals:
@@ -62,6 +62,7 @@ private:
     QString m_whisperPath;
     QString m_modelPath;
     QString m_cachePath;
+    QString m_language = QStringLiteral("auto");
     QString m_status;
     QUrl m_resultFile;
     QAudioDecoder m_decoder;

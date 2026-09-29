@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ClairDesktop VERSION 0.3.6 LANGUAGES CXX)
+project(ClairDesktop VERSION 0.3.7 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)

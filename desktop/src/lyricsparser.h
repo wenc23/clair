@@ -15,3 +15,7 @@ QVector<LrcLine> parseLrc(const QString &contents);
 // Return the active line's index, or -1 before the first timestamp.
 // Equal timestamps select the last line at that timestamp.
 int lineAt(const QVector<LrcLine> &lines, qint64 positionMs);
+
+// Conservative guard for Whisper drafts, not a validator for user-provided lyrics.
+// Empty return means no obvious repetition/music-only hallucination was found.
+QString transcriptionQualityIssue(const QVector<LrcLine> &lines);

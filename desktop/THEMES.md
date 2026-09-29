@@ -2,7 +2,7 @@
 
 The native app accepts either **1–3 local images** or a prepared `manifest.json` theme pack. Its three fixed slots are `background` (1920×1080), `cover` (600×600), and `sidebar` (480×1080). For image-group import, selected-file order maps to these slots; a missing slot reuses the last image. The editor automatically center-crops first, then lets the user drag an aspect-locked selection and change its size. Every output is a PNG of the exact slot dimensions.
 
-The portable Windows build accepts PNG, JPEG and BMP originals. WebP is not advertised because the bundled Qt runtime does not include a WebP image plugin.
+The portable Windows build accepts PNG, JPEG/JPG and BMP originals. These are input formats; cropped theme assets are saved as PNG without changing originals. WebP/HEIC are not advertised because the bundled Qt runtime does not include the required image plugins.
 
 Original images are copied byte-for-byte into the app-data theme directory and never modified. A manual crop only regenerates its slot output. The active theme ID is stored in `themes/current.txt`; activating the empty ID restores the default appearance. Removing a theme deletes only that theme's private copy, not the user's source images.
 

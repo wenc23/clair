@@ -1,4 +1,4 @@
-# Clair Desktop Linux x64 试用版 0.3.6
+# Clair Desktop Linux x64 试用版 0.3.7
 
 解压后运行 `bin/clair-desktop`。这是原生 Qt 桌面应用，播放不依赖浏览器、Node.js 或 Web 服务。可导入目录或任意位置单独文件；支持播放模式、分组、歌词页/浮窗、主题图片组与框选裁剪。`bin/web/` 仅供“打开 Web 版”按钮使用。
 

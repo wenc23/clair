@@ -18,7 +18,7 @@ Windows + Qt 6.8.3 MinGW 的 `qmlimportscanner` 在含非 ASCII 字符的源码�
 
 Qt 6.8+ 还提供原生安装部署：`cmake --install desktop/build --prefix <目标目录>`。CMake 会部署 QML、Qt 运行库和随包 Web 静态文件；macOS 安装出 `.app`，Linux 安装出 `bin/clair-desktop`。Linux 的系统级 XCB/OpenGL 依赖仍需目标发行版提供（本机 Ubuntu 24.04 已验证 `libxcb-cursor0`、`libxcb-icccm4`、`libxcb-keysyms1` 等）；不能把在 Ubuntu 24.04 打的包宣称兼容所有较旧发行版。
 
-Linux x64 可从 Release 构建生成独立压缩包：`bash desktop/package-linux.sh /absolute/build /absolute/output/Clair-Desktop-Linux-x64-Preview-0.3.6.tar.gz [ASSETS_DIR]`。Windows 使用 `desktop/package-windows.ps1 -BuildDir ... -OutputDir ... [-TranscriptionAssetsDir ...]`。两种脚本均要求提供固定哈希的 whisper.cpp 轻量模型和本机 `whisper-cli`，拒绝生成缺件包；脚本也拒绝覆盖已有目标并写 SHA-256 文件。macOS 目前提供 CMake `.app` 安装路径，尚未在 macOS 主机验证或打包发行。
+Linux x64 可从 Release 构建生成独立压缩包：`bash desktop/package-linux.sh /absolute/build /absolute/output/Clair-Desktop-Linux-x64-Preview-0.3.7.tar.gz [ASSETS_DIR]`。Windows 使用 `desktop/package-windows.ps1 -BuildDir ... -OutputDir ... [-TranscriptionAssetsDir ...]`。两种脚本均要求提供固定哈希的 whisper.cpp 轻量模型和本机 `whisper-cli`，拒绝生成缺件包；脚本也拒绝覆盖已有目标并写 SHA-256 文件。macOS 目前提供 CMake `.app` 安装路径，尚未在 macOS 主机验证或打包发行。
 
 ## 当前能力
 

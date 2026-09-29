@@ -38,7 +38,7 @@ Dialog {
         id: imagesDialog
         title: "选择主题图片组（顺序：背景、封面、侧栏）"
         fileMode: FileDialog.OpenFiles
-        nameFilters: ["图片 (*.png *.jpg *.jpeg *.bmp)"]
+        nameFilters: ["支持的图片：PNG、JPG/JPEG、BMP (*.png *.jpg *.jpeg *.bmp)"]
         onAccepted: {
             if (themeManager.createTheme(nameField.text, selectedFiles))
                 editor.resetSelection()
@@ -64,13 +64,13 @@ Dialog {
                 placeholderText: "新主题名称"
                 text: "我的主题"
             }
-            Button { text: "导入图片组"; onClicked: imagesDialog.open() }
+            Button { text: "选择原图（PNG/JPG/BMP）"; onClicked: imagesDialog.open() }
             Button { text: "导入 AI 主题包"; onClicked: packDialog.open() }
             Button { text: "恢复默认"; onClicked: themeManager.activateTheme("") }
         }
         Label {
             Layout.fillWidth: true
-            text: "原图会保留；裁剪仅生成新的 PNG，不修改你的图片。1–3 张图按背景、封面、侧栏顺序分配；不足 3 张时复用最后一张。"
+            text: "可导入 PNG、JPG/JPEG、BMP 原图；裁剪后统一生成 PNG 主题图，原图不变。WebP/HEIC 暂不支持。1–3 张图依次作为背景、封面、侧栏；不足时复用最后一张。"
             wrapMode: Text.Wrap
             color: "#aeb8c4"
         }

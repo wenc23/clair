@@ -10,6 +10,7 @@ private slots:
     void appliesOffsetGloballyAndSortsStably();
     void findsActiveLine();
     void ignoresMalformedTimestamps();
+    void rejectsRepeatedTranscriptionHallucination();
 };
 
 void LyricsParserTest::parsesBomMetadataAndMultipleTimestamps()
@@ -61,6 +62,24 @@ void LyricsParserTest::ignoresMalformedTimestamps()
         "[00:03.00]good"));
     QCOMPARE(lines.size(), 1);
     QCOMPARE(lines.at(0).text, QStringLiteral("good"));
+}
+
+void LyricsParserTest::rejectsRepeatedTranscriptionHallucination()
+{
+    QVector<LrcLine> hallucinated;
+    for (int i = 0; i < 148; ++i)
+        hallucinated.append({i * 2000, QStringLiteral("So we're going to do the same thing as yesterday.")});
+    QVERIFY(transcriptionQualityIssue(hallucinated).contains(QStringLiteral("重复")));
+
+    QVector<LrcLine> normal;
+    for (int i = 0; i < 30; ++i)
+        normal.append({i * 2000, QStringLiteral("A different verse %1").arg(i)});
+    QVERIFY(transcriptionQualityIssue(normal).isEmpty());
+
+    QVector<LrcLine> instrumental;
+    for (int i = 0; i < 10; ++i)
+        instrumental.append({i * 2000, QStringLiteral("[music]")});
+    QVERIFY(transcriptionQualityIssue(instrumental).contains(QStringLiteral("音乐提示")));
 }
 
 QTEST_GUILESS_MAIN(LyricsParserTest)

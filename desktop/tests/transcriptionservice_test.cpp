@@ -44,6 +44,15 @@ int fakeTool(const QStringList &args)
     if (args.contains("-olrc")) {
         if (argumentAfter(args, "-m").contains("slow")) QThread::msleep(2500);
         const QString output = argumentAfter(args, "-of") + ".lrc";
+        if (argumentAfter(args, "-m").contains("hallucination")) {
+            QByteArray repeated;
+            for (int i = 0; i < 30; ++i)
+                repeated += QByteArray("[00:") + QByteArray::number(i).rightJustified(2, '0')
+                            + ".00]same invented line\n";
+            return writeFile(output, repeated) ? 0 : 9;
+        }
+        if (argumentAfter(args, "-m").contains("language"))
+            return writeFile(output, "[00:01.00]" + argumentAfter(args, "-l").toUtf8() + "\n") ? 0 : 9;
         return writeFile(output, "[00:01.00]draft line\n[00:03.20]second line\n") ? 0 : 9;
     }
     return 10;
@@ -57,6 +66,8 @@ private slots:
     void reportsConversionFailure();
     void cancelStopsRecognition();
     void cancelStopsConversion();
+    void rejectsRepeatedHallucination();
+    void infersEnglishFromBracketedSongTitle();
     void decodesOptionalRealAudio();
     void usesBundledModelIfRequested();
 };
@@ -141,6 +152,44 @@ void TranscriptionServiceTest::cancelStopsConversion()
     QVERIFY(!service.busy());
     QCOMPARE(completed.size(), 0);
     QVERIFY(service.status().contains(QStringLiteral("取消")));
+}
+
+void TranscriptionServiceTest::rejectsRepeatedHallucination()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString audio = dir.filePath("sample.wav");
+    const QString model = dir.filePath("hallucination.bin");
+    QVERIFY(writeWave(audio));
+    QVERIFY(writeFile(model, "dummy model"));
+    TranscriptionService service;
+    service.setWhisperExecutable(QUrl::fromLocalFile(QCoreApplication::applicationFilePath()));
+    service.setModelFile(QUrl::fromLocalFile(model));
+    QSignalSpy completed(&service, &TranscriptionService::completed);
+    service.transcribe(QUrl::fromLocalFile(audio));
+    QTRY_VERIFY_WITH_TIMEOUT(!service.busy(), 10000);
+    QCOMPARE(completed.size(), 0);
+    QVERIFY(service.resultFile().isEmpty());
+    QVERIFY2(service.status().contains(QStringLiteral("重复")), qPrintable(service.status()));
+}
+
+void TranscriptionServiceTest::infersEnglishFromBracketedSongTitle()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString audio = dir.filePath(QStringLiteral("Glass Animals《The Other Side Of Paradise》试听.wav"));
+    const QString model = dir.filePath("language.bin");
+    QVERIFY(writeWave(audio));
+    QVERIFY(writeFile(model, "dummy model"));
+    TranscriptionService service;
+    service.setWhisperExecutable(QUrl::fromLocalFile(QCoreApplication::applicationFilePath()));
+    service.setModelFile(QUrl::fromLocalFile(model));
+    QSignalSpy completed(&service, &TranscriptionService::completed);
+    service.transcribe(QUrl::fromLocalFile(audio));
+    QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 1, 10000);
+    QFile result(service.resultFile().toLocalFile());
+    QVERIFY(result.open(QIODevice::ReadOnly));
+    QVERIFY(result.readAll().contains("]en"));
 }
 
 void TranscriptionServiceTest::decodesOptionalRealAudio()

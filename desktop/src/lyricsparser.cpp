@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <QHash>
 
 QVector<LrcLine> parseLrc(const QString &contents)
 {
@@ -79,4 +80,39 @@ int lineAt(const QVector<LrcLine> &lines, qint64 positionMs)
                                            return position < line.timeMs;
                                        });
     return next == lines.cbegin() ? -1 : static_cast<int>(next - lines.cbegin() - 1);
+}
+
+QString transcriptionQualityIssue(const QVector<LrcLine> &lines)
+{
+    QHash<QString, int> counts;
+    int nonempty = 0;
+    int longestRun = 0;
+    int currentRun = 0;
+    int musicOnly = 0;
+    QString previous;
+    static const QRegularExpression punctuation(QStringLiteral("[^\\p{L}\\p{N}]+"));
+    for (const LrcLine &line : lines) {
+        QString value = line.text.trimmed().toCaseFolded();
+        value.remove(punctuation);
+        if (value.isEmpty()) continue;
+        ++nonempty;
+        ++counts[value];
+        if (value == previous) ++currentRun;
+        else currentRun = 1;
+        longestRun = std::max(longestRun, currentRun);
+        previous = value;
+        if (value == QStringLiteral("music") || value == QStringLiteral("instrumental") ||
+            value == QStringLiteral("applause") || value == QStringLiteral("silence"))
+            ++musicOnly;
+    }
+    if (nonempty == 0) return QStringLiteral("识别结果没有可用歌词");
+    if (nonempty >= 8 && musicOnly * 4 >= nonempty * 3)
+        return QStringLiteral("识别结果几乎只有音乐提示，没有可靠歌词");
+    int mostCommon = 0;
+    for (auto it = counts.cbegin(); it != counts.cend(); ++it)
+        mostCommon = std::max(mostCommon, it.value());
+    if ((longestRun >= 12 && nonempty >= 16) ||
+        (nonempty >= 20 && mostCommon * 4 >= nonempty * 3))
+        return QStringLiteral("识别结果大量重复同一句，疑似模型幻觉");
+    return {};
 }
