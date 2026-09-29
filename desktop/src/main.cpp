@@ -24,7 +24,8 @@ int main(int argc, char *argv[])
     const QStringList arguments = app.arguments();
     const bool diagnostic = arguments.contains("--smoke") ||
         arguments.contains("--screenshot") || arguments.contains("--screenshot-theme") ||
-        arguments.contains("--screenshot-lyrics") || arguments.contains("--screenshot-lyrics-controls");
+        arguments.contains("--screenshot-lyrics") || arguments.contains("--screenshot-lyrics-controls") ||
+        arguments.contains("--idle-smoke");
     std::unique_ptr<QTemporaryDir> diagnosticSettings;
     if (diagnostic) {
         diagnosticSettings = std::make_unique<QTemporaryDir>();
@@ -85,6 +86,13 @@ int main(int argc, char *argv[])
     }
     if (arguments.contains("--smoke"))
         QTimer::singleShot(250, &app, &QCoreApplication::quit);
+    const int idleArg = arguments.indexOf("--idle-smoke");
+    if (idleArg >= 0) {
+        bool valid = false;
+        const int seconds = arguments.value(idleArg + 1).toInt(&valid);
+        if (!valid || seconds < 1 || seconds > 3600) return 2;
+        QTimer::singleShot(seconds * 1000, &app, &QCoreApplication::quit);
+    }
     const int screenshotArg = arguments.indexOf("--screenshot");
     if (screenshotArg >= 0 && screenshotArg + 1 < arguments.size()) {
         const QString path = arguments.at(screenshotArg + 1);
@@ -99,6 +107,19 @@ int main(int argc, char *argv[])
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         if (auto *dialog = window ? window->findChild<QObject *>("themeEditor") : nullptr)
             QMetaObject::invokeMethod(dialog, "open");
+        QTimer::singleShot(800, &app, [window, path, &app] {
+            app.exit(window && window->grabWindow().save(path) ? 0 : 2);
+        });
+    }
+    const int aiGuideScreenshotArg = arguments.indexOf("--screenshot-ai-guide");
+    if (aiGuideScreenshotArg >= 0 && aiGuideScreenshotArg + 1 < arguments.size()) {
+        const QString path = arguments.at(aiGuideScreenshotArg + 1);
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        if (auto *themeDialog = window ? window->findChild<QObject *>("themeEditor") : nullptr) {
+            QMetaObject::invokeMethod(themeDialog, "open");
+            if (auto *guide = themeDialog->findChild<QObject *>("aiThemeGuide"))
+                QMetaObject::invokeMethod(guide, "open");
+        }
         QTimer::singleShot(800, &app, [window, path, &app] {
             app.exit(window && window->grabWindow().save(path) ? 0 : 2);
         });

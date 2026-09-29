@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace {
 struct SearchIdentity { QString title; QString artist; };
@@ -97,18 +98,29 @@ void LyricsService::loadText(const QByteArray &bytes, const QString &origin)
     m_timingKey = QStringLiteral("lyrics/timing/") + keyForCurrentTrack().mid(7)
                   + QLatin1Char('/') + QString::fromLatin1(
                       QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
-    m_lineTimes.clear();
-    const QVariantMap saved = QSettings(QSettings::UserScope, "Clair", "ClairDesktop")
-                                  .value(m_timingKey).toMap();
-    for (auto it = saved.cbegin(); it != saved.cend(); ++it) {
-        bool indexValid = false;
-        bool timeValid = false;
-        const int index = it.key().toInt(&indexValid);
-        const qint64 time = it.value().toLongLong(&timeValid);
-        if (indexValid && timeValid && index >= 0 && index < m_originalLines.size() &&
-            time >= 0 && time <= 24 * 60 * 60 * 1000)
-            m_lineTimes.insert(index, time);
+    m_offsetMs = 0;
+    const QVariant saved = QSettings(QSettings::UserScope, "Clair", "ClairDesktop")
+                               .value(m_timingKey);
+    bool offsetValid = false;
+    qint64 offset = saved.toLongLong(&offsetValid);
+    // 0.3.7 stored per-line overrides. A single correction can be migrated
+    // unambiguously to the new whole-song shift; multiple corrections cannot.
+    if (!offsetValid && saved.metaType() == QMetaType::fromType<QVariantMap>()) {
+        const QVariantMap old = saved.toMap();
+        if (old.size() == 1) {
+            const auto entry = old.cbegin();
+            bool indexValid = false;
+            bool timeValid = false;
+            const int index = entry.key().toInt(&indexValid);
+            const qint64 time = entry.value().toLongLong(&timeValid);
+            if (indexValid && timeValid && index >= 0 && index < m_originalLines.size()) {
+                offset = time - m_originalLines.at(index).timeMs;
+                offsetValid = true;
+            }
+        }
     }
+    if (offsetValid && offset >= -24 * 60 * 60 * 1000LL && offset <= 24 * 60 * 60 * 1000LL)
+        m_offsetMs = offset;
     applyLineTimes();
     emit lyricsChanged();
     setStatus(m_lines.isEmpty() && m_plainText.isEmpty()
@@ -118,34 +130,29 @@ void LyricsService::loadText(const QByteArray &bytes, const QString &origin)
 
 void LyricsService::applyLineTimes()
 {
-    struct Entry { LrcLine line; int sourceIndex; };
-    QVector<Entry> entries;
-    entries.reserve(m_originalLines.size());
-    for (int i = 0; i < m_originalLines.size(); ++i) {
-        LrcLine line = m_originalLines.at(i);
-        if (m_lineTimes.contains(i)) line.timeMs = m_lineTimes.value(i);
-        entries.append({line, i});
-    }
-    std::stable_sort(entries.begin(), entries.end(), [](const Entry &a, const Entry &b) {
-        return a.line.timeMs < b.line.timeMs;
-    });
     m_lines.clear();
     m_sourceIndices.clear();
-    for (const Entry &entry : entries) {
-        m_lines.append(entry.line);
-        m_sourceIndices.append(entry.sourceIndex);
+    m_lines.reserve(m_originalLines.size());
+    m_sourceIndices.reserve(m_originalLines.size());
+    for (int i = 0; i < m_originalLines.size(); ++i) {
+        LrcLine line = m_originalLines.at(i);
+        if (m_offsetMs > 0 && line.timeMs > std::numeric_limits<qint64>::max() - m_offsetMs)
+            line.timeMs = std::numeric_limits<qint64>::max();
+        else if (m_offsetMs < 0 && line.timeMs < std::numeric_limits<qint64>::min() - m_offsetMs)
+            line.timeMs = std::numeric_limits<qint64>::min();
+        else
+            line.timeMs += m_offsetMs;
+        m_lines.append(line);
+        m_sourceIndices.append(i);
     }
 }
 
-bool LyricsService::saveLineTimes()
+bool LyricsService::saveTimingOffset()
 {
     if (m_timingKey.isEmpty()) return false;
-    QVariantMap saved;
-    for (auto it = m_lineTimes.cbegin(); it != m_lineTimes.cend(); ++it)
-        saved.insert(QString::number(it.key()), it.value());
     QSettings settings(QSettings::UserScope, "Clair", "ClairDesktop");
-    if (saved.isEmpty()) settings.remove(m_timingKey);
-    else settings.setValue(m_timingKey, saved);
+    if (m_offsetMs == 0) settings.remove(m_timingKey);
+    else settings.setValue(m_timingKey, m_offsetMs);
     settings.sync();
     return settings.status() == QSettings::NoError;
 }
@@ -157,23 +164,34 @@ bool LyricsService::adjustLineTime(int sourceIndex, qint64 timeMs)
         setStatus(QStringLiteral("歌词时间无效；请输入 0 到 24 小时内的时间。"));
         return false;
     }
-    m_lineTimes.insert(sourceIndex, timeMs);
+    const qint64 originalTime = m_originalLines.at(sourceIndex).timeMs;
+    if (originalTime < -24 * 60 * 60 * 1000LL || originalTime > 24 * 60 * 60 * 1000LL) {
+        setStatus(QStringLiteral("原歌词时间异常，不能作为整体校时锚点。"));
+        return false;
+    }
+    if (timeMs - originalTime < -24 * 60 * 60 * 1000LL ||
+        timeMs - originalTime > 24 * 60 * 60 * 1000LL) {
+        setStatus(QStringLiteral("整体校时幅度不能超过 24 小时。"));
+        return false;
+    }
+    m_offsetMs = timeMs - originalTime;
     applyLineTimes();
     emit lyricsChanged();
-    const bool saved = saveLineTimes();
-    setStatus(saved ? QStringLiteral("已保存该行歌词的时间，不修改原 LRC。")
-                    : QStringLiteral("已在本次运行中调整，但无法保存校时设置。"));
+    const bool saved = saveTimingOffset();
+    setStatus(saved ? QStringLiteral("已将整首歌词平移 %1 秒，各句间隔不变；原 LRC 未修改。")
+                          .arg(QString::number(m_offsetMs / 1000.0, 'f', 2))
+                    : QStringLiteral("已在本次运行中整体平移歌词，但无法保存校时设置。"));
     return saved;
 }
 
-bool LyricsService::resetLineTime(int sourceIndex)
+bool LyricsService::resetTimingOffset()
 {
-    if (sourceIndex < 0 || sourceIndex >= m_originalLines.size()) return false;
-    m_lineTimes.remove(sourceIndex);
+    if (m_originalLines.isEmpty()) return false;
+    m_offsetMs = 0;
     applyLineTimes();
     emit lyricsChanged();
-    const bool saved = saveLineTimes();
-    setStatus(saved ? QStringLiteral("已恢复该行歌词的原始时间。")
+    const bool saved = saveTimingOffset();
+    setStatus(saved ? QStringLiteral("已恢复整首歌词的原始时间。")
                     : QStringLiteral("已恢复本次显示，但无法保存校时设置。"));
     return saved;
 }
@@ -185,14 +203,21 @@ void LyricsService::setStatus(const QString &status)
     emit statusChanged();
 }
 
-void LyricsService::loadForTrack(const QUrl &audio)
+void LyricsService::cancelPendingSearch()
 {
     ++m_searchGeneration;
+    if (m_activeReply) m_activeReply->abort();
+    m_activeReply.clear();
+}
+
+void LyricsService::loadForTrack(const QUrl &audio)
+{
+    cancelPendingSearch();
     m_trackPath = audio.toLocalFile();
     m_lines.clear();
     m_originalLines.clear();
     m_sourceIndices.clear();
-    m_lineTimes.clear();
+    m_offsetMs = 0;
     m_timingKey.clear();
     m_plainText.clear();
     m_candidates.clear();
@@ -247,11 +272,12 @@ void LyricsService::importLrc(const QUrl &fileUrl)
 
 void LyricsService::search(const QString &title, const QString &artist, qint64 durationMs)
 {
+    cancelPendingSearch();
     const SearchIdentity identity = cleanSearchIdentity(title, artist);
     if (m_trackPath.isEmpty() || identity.title.isEmpty()) {
         setStatus(QStringLiteral("请先选择歌曲并填写歌名。")); return;
     }
-    const quint64 generation = ++m_searchGeneration;
+    const quint64 generation = m_searchGeneration;
     m_candidates.clear();
     m_candidateLyrics.clear();
     emit candidatesChanged();
@@ -272,12 +298,14 @@ void LyricsService::requestSearch(const QString &title, const QString &artist,
     url.setQuery(query);
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::UserAgentHeader,
-                      QStringLiteral("ClairDesktop/0.3.7 (https://gitee.com/wenc23/clair)"));
+                      QStringLiteral("ClairDesktop/0.3.9 (https://gitee.com/wenc23/clair)"));
     request.setTransferTimeout(15000);
     const QString requestedPath = m_trackPath;
     auto *reply = m_network.get(request);
+    m_activeReply = reply;
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, requestedPath, title, artist, durationMs, broad, generation] {
+        if (m_activeReply == reply) m_activeReply.clear();
         reply->deleteLater();
         if (requestedPath != m_trackPath || generation != m_searchGeneration) return;
         const int httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();

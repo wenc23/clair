@@ -6,10 +6,12 @@
 #include <QHostAddress>
 #include <QSet>
 #include <QTcpSocket>
+#include <QTimer>
 
 namespace {
 
 constexpr qsizetype kMaxRequestBytes = 8192;
+constexpr int kConnectionTimeoutMs = 5000;
 const QSet<QByteArray> kPublicFiles {
     "index.html", "styles.css", "app.js", "flac-metadata.js",
     "library-model.js", "theme-model.js", "shared-state-web.js",
@@ -66,6 +68,12 @@ void WebServer::handleConnection()
     while (QTcpSocket *socket = m_listener.nextPendingConnection()) {
         socket->setParent(this);
         auto *buffer = new QByteArray;
+        // A client can otherwise hold a partial HTTP request open forever,
+        // retaining its socket and request buffer for the lifetime of Clair.
+        QTimer::singleShot(kConnectionTimeoutMs, socket, [socket] {
+            if (socket->state() != QAbstractSocket::UnconnectedState)
+                socket->abort();
+        });
         connect(socket, &QTcpSocket::readyRead, socket, [this, socket, buffer] {
             if (socket->property("answered").toBool()) return;
             buffer->append(socket->readAll());

@@ -4,6 +4,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QSignalSpy>
+#include <QTcpSocket>
 #include <QtTest>
 
 class WebServerTest final : public QObject {
@@ -11,7 +12,22 @@ class WebServerTest final : public QObject {
 
 private slots:
     void servesBundledPageAndAllowlistedAssets();
+    void closesIncompleteRequests();
 };
+
+void WebServerTest::closesIncompleteRequests()
+{
+    WebServer server;
+    QVERIFY(server.start());
+    QTcpSocket partial;
+    partial.connectToHost("127.0.0.1", server.url().port());
+    QVERIFY(partial.waitForConnected(3000));
+    QSignalSpy disconnected(&partial, &QTcpSocket::disconnected);
+    const QByteArray request = "GET /index.html HTTP/1.1\r\nHost: localhost\r\n";
+    QCOMPARE(partial.write(request), qint64(request.size()));
+    partial.flush();
+    QTRY_COMPARE_WITH_TIMEOUT(disconnected.size(), 1, 8000);
+}
 
 void WebServerTest::servesBundledPageAndAllowlistedAssets()
 {

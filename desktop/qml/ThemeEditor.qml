@@ -40,9 +40,20 @@ Dialog {
         fileMode: FileDialog.OpenFiles
         nameFilters: ["支持的图片：PNG、JPG/JPEG、BMP (*.png *.jpg *.jpeg *.bmp)"]
         onAccepted: {
-            if (themeManager.createTheme(nameField.text, selectedFiles))
+            const imageUrls = []
+            for (let i = 0; i < selectedFiles.length; i++)
+                imageUrls.push(selectedFiles[i].toString())
+            if (themeManager.createTheme(nameField.text, imageUrls))
                 editor.resetSelection()
+            else
+                imageImportError.open()
         }
+    }
+    MessageDialog {
+        id: imageImportError
+        title: "图片无法导入"
+        text: themeManager.errorString
+        buttons: MessageDialog.Ok
     }
     FileDialog {
         id: packDialog
@@ -50,6 +61,76 @@ Dialog {
         nameFilters: ["主题清单 (manifest.json)", "JSON (*.json)"]
         onAccepted: {
             if (themeManager.importThemePack(selectedFile)) editor.resetSelection()
+            else packImportError.open()
+        }
+    }
+    MessageDialog {
+        id: packImportError
+        title: "主题包无法导入"
+        text: themeManager.errorString
+        buttons: MessageDialog.Ok
+    }
+    Dialog {
+        id: aiGuideDialog
+        objectName: "aiThemeGuide"
+        title: "先让 AI 制作主题包"
+        modal: true
+        width: Math.min(editor.width - 36, 760)
+        height: Math.min(editor.height - 36, 560)
+        anchors.centerIn: parent
+        standardButtons: Dialog.Close
+        property bool copied: false
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+            Label {
+                Layout.fillWidth: true
+                text: "先把参考图片和下方提示词发给 AI。AI 输出一个文件夹后，在这里选择其中的 manifest.json。"
+                wrapMode: Text.Wrap
+            }
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                TextArea {
+                    id: aiPromptArea
+                    readOnly: true
+                    wrapMode: TextEdit.Wrap
+                    font.pixelSize: 14
+                    padding: 12
+                    text: "请根据我提供的 1–3 张参考图片，为 Clair Desktop 制作 v1 图片组主题包。\n\n"
+                          + "目标尺寸：背景 background 1920×1080、封面 cover 600×600、侧栏 sidebar 480×1080。"
+                          + "第 1 张图给背景，第 2 张给封面，第 3 张给侧栏；不足 3 张时复用最后一张。"
+                          + "请智能选择裁剪区域，保留主体、人脸和重要文字，避免拉伸；先给我看三张裁剪预览。\n\n"
+                          + "请保留原图不变，在同一个输出文件夹内放 manifest.json 和所引用的原图副本，"
+                          + "例如 original-0.jpg（也可按原图格式使用 .png 或 .bmp）。"
+                          + "manifest.json 的 version 必须为 1；slots 包含 background、cover、sidebar。"
+                          + "每个槽位写入 original 文件名、output（分别为 background.png、cover.png、sidebar.png）、"
+                          + "crop（相对原图的 [x,y,w,h]，每项 0–1）、width 和 height。"
+                          + "裁剪图统一为 PNG，尺寸必须与目标尺寸一致。不要只交三张 PNG 而缺少 manifest.json 和原图副本。\n\n"
+                          + "如果可以访问 Clair 随包的 theme-skill，请优先按 SKILL.md 使用 crop_theme.py 导出，"
+                          + "并检查 manifest、原图引用与三张预览图。完成后告诉我 manifest.json 的位置。"
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    text: aiGuideDialog.copied ? "已复制提示词" : "复制提示词"
+                    onClicked: {
+                        aiPromptArea.selectAll()
+                        aiPromptArea.copy()
+                        aiPromptArea.deselect()
+                        aiGuideDialog.copied = true
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "选择 manifest.json 导入"
+                    onClicked: {
+                        aiGuideDialog.close()
+                        packDialog.open()
+                    }
+                }
+            }
         }
     }
 
@@ -65,7 +146,7 @@ Dialog {
                 text: "我的主题"
             }
             Button { text: "选择原图（PNG/JPG/BMP）"; onClicked: imagesDialog.open() }
-            Button { text: "导入 AI 主题包"; onClicked: packDialog.open() }
+            Button { text: "用 AI 制作/导入主题包"; onClicked: aiGuideDialog.open() }
             Button { text: "恢复默认"; onClicked: themeManager.activateTheme("") }
         }
         Label {

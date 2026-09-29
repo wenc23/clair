@@ -1,14 +1,24 @@
 #include "../src/transcriptionservice.h"
+#include "../src/transcriptioncache.h"
 
 #include <QCoreApplication>
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
+#include <QLockFile>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QThread>
+
+#include <filesystem>
+#include <chrono>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 namespace {
 bool writeFile(const QString &path, const QByteArray &data)
@@ -57,6 +67,35 @@ int fakeTool(const QStringList &args)
     }
     return 10;
 }
+
+bool setOld(const QString &path, int days)
+{
+#ifdef Q_OS_WIN
+    if (QFileInfo(path).isDir()) {
+        const std::wstring native = path.toStdWString();
+        HANDLE handle = CreateFileW(native.c_str(), FILE_WRITE_ATTRIBUTES,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                    nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) return false;
+        FILETIME current;
+        GetSystemTimeAsFileTime(&current);
+        ULARGE_INTEGER value;
+        value.LowPart = current.dwLowDateTime;
+        value.HighPart = current.dwHighDateTime;
+        value.QuadPart -= quint64(days) * 24 * 60 * 60 * 10000000ULL;
+        FILETIME target{value.LowPart, value.HighPart};
+        const bool success = SetFileTime(handle, nullptr, nullptr, &target);
+        CloseHandle(handle);
+        return success;
+    }
+#endif
+    const auto target = std::filesystem::file_time_type::clock::now() -
+                        std::chrono::hours(24 * days);
+    std::error_code error;
+    std::filesystem::last_write_time(std::filesystem::u8path(path.toUtf8().constData()),
+                                     target, error);
+    return !error;
+}
 }
 
 class TranscriptionServiceTest : public QObject {
@@ -70,7 +109,51 @@ private slots:
     void infersEnglishFromBracketedSongTitle();
     void decodesOptionalRealAudio();
     void usesBundledModelIfRequested();
+    void prunesOnlyOldUnselectedCacheAndStaleJobs();
 };
+
+void TranscriptionServiceTest::prunesOnlyOldUnselectedCacheAndStaleJobs()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QDir root(dir.path());
+    const QString selected = root.filePath(QStringLiteral("%1.lrc").arg(0, 64, 16, QLatin1Char('0')));
+    const QString fresh = root.filePath(QStringLiteral("%1.lrc").arg(259, 64, 16, QLatin1Char('0')));
+    for (int i = 0; i < 260; ++i) {
+        const QString path = root.filePath(QStringLiteral("%1.lrc").arg(i, 64, 16, QLatin1Char('0')));
+        QVERIFY(writeFile(path, "draft"));
+        if (i != 259) QVERIFY(setOld(path, 3));
+    }
+    const QString userFile = root.filePath("personal.lrc");
+    QVERIFY(writeFile(userFile, "keep"));
+
+    const QString stale = root.filePath("job-ABC123");
+    const QString unknown = root.filePath("job-ABC124");
+    const QString active = root.filePath("job-ABC125");
+    for (const QString &path : {stale, unknown, active}) QVERIFY(QDir().mkpath(path));
+    QVERIFY(writeFile(QDir(stale).filePath("audio.wav"), "temporary"));
+    QVERIFY(writeFile(QDir(unknown).filePath("personal.txt"), "do not delete"));
+    QVERIFY(writeFile(QDir(active).filePath("audio.wav"), "temporary"));
+    QLockFile liveLock(QDir(active).filePath(".running.lock"));
+    QVERIFY(liveLock.tryLock(0));
+    for (const QString &path : {QDir(stale).filePath("audio.wav"),
+                                QDir(unknown).filePath("personal.txt"),
+                                QDir(active).filePath("audio.wav")}) QVERIFY(setOld(path, 31));
+    for (const QString &path : {stale, unknown}) QVERIFY(setOld(path, 31));
+
+    QSettings settings(root.filePath("settings.ini"), QSettings::IniFormat);
+    settings.setValue(QStringLiteral("lyrics/%1").arg(QString(64, QLatin1Char('a'))), selected);
+    pruneTranscriptionCache(dir.path(), {}, settings);
+
+    QVERIFY(QFileInfo::exists(selected));
+    QVERIFY(QFileInfo::exists(fresh));
+    QVERIFY(QFileInfo::exists(userFile));
+    QVERIFY(!QFileInfo::exists(stale));
+    QVERIFY(QFileInfo::exists(unknown));
+    QVERIFY(QFileInfo::exists(active));
+    QCOMPARE(root.entryList({"*.lrc"}, QDir::Files).size(), 257); // 256 generated + personal.lrc
+    liveLock.unlock();
+}
 
 void TranscriptionServiceTest::producesAndReusesCache()
 {

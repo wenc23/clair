@@ -1,6 +1,7 @@
 #include "transcriptionservice.h"
 
 #include "lyricsparser.h"
+#include "transcriptioncache.h"
 
 #include <QAudioBuffer>
 #include <QCryptographicHash>
@@ -59,11 +60,15 @@ QString inferredLanguage(const QString &path)
     if (latin >= 5 && latin >= 2 * (han + kana + hangul)) return QStringLiteral("en");
     return QStringLiteral("auto");
 }
+
 }
 
 TranscriptionService::TranscriptionService(QObject *parent) : QObject(parent)
 {
     QSettings settings(QSettings::UserScope, "Clair", "ClairDesktop");
+    const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                             + QStringLiteral("/transcriptions");
+    pruneTranscriptionCache(cacheDir, {}, settings);
     const QString customWhisper = settings.value("transcription/whisper").toString();
     const QString customModel = settings.value("transcription/model").toString();
     m_whisperPath = validTool(customWhisper) ? customWhisper : bundledWhisper();
@@ -108,6 +113,13 @@ TranscriptionService::~TranscriptionService()
         m_process.kill();
         m_process.waitForFinished(1000);
     }
+    resetWorkspace();
+}
+
+void TranscriptionService::resetWorkspace()
+{
+    m_workspaceLock.reset();
+    m_workspace.reset();
 }
 
 void TranscriptionService::setWhisperExecutable(const QUrl &file)
@@ -204,6 +216,8 @@ void TranscriptionService::transcribe(const QUrl &audioFile, const QString &lang
                              + QStringLiteral("/transcriptions");
     if (!QDir().mkpath(cacheDir)) { setStatus(QStringLiteral("无法创建转写缓存目录。")); return; }
     m_cachePath = QDir(cacheDir).filePath(cacheKey(audioPath) + QStringLiteral(".lrc"));
+    pruneTranscriptionCache(cacheDir, m_cachePath,
+                            QSettings(QSettings::UserScope, "Clair", "ClairDesktop"));
     QFile cache(m_cachePath);
     if (cache.size() <= 5 * 1024 * 1024 && cache.open(QIODevice::ReadOnly)) {
         const auto lines = parseLrc(QString::fromUtf8(cache.readAll()));
@@ -216,6 +230,10 @@ void TranscriptionService::transcribe(const QUrl &audioFile, const QString &lang
     }
     m_workspace = std::make_unique<QTemporaryDir>(QDir(cacheDir).filePath("job-XXXXXX"));
     if (!m_workspace->isValid()) { fail(QStringLiteral("无法创建临时转写目录。")); return; }
+    m_workspaceLock = std::make_unique<QLockFile>(m_workspace->filePath(".running.lock"));
+    if (!m_workspaceLock->tryLock(0)) {
+        fail(QStringLiteral("无法锁定临时转写目录。")); return;
+    }
     m_pcmBytes = 0;
     m_inputSampleRate = 0;
     m_lastDecodePercent = -1;
@@ -356,7 +374,7 @@ void TranscriptionService::processFinished(int exitCode, QProcess::ExitStatus ex
     const Phase phase = m_phase;
     if (phase == Phase::Idle) return;
     if (phase == Phase::Canceling) {
-        m_workspace.reset();
+        resetWorkspace();
         setPhase(Phase::Idle);
         setStatus(QStringLiteral("已取消离线转写。"));
         return;
@@ -373,6 +391,9 @@ void TranscriptionService::processFinished(int exitCode, QProcess::ExitStatus ex
     if (!draft.open(QIODevice::ReadOnly)) {
         fail(QStringLiteral("识别程序未生成 LRC；请确认所选的是支持 -olrc 的 whisper-cli。")); return;
     }
+    if (draft.size() > 5 * 1024 * 1024) {
+        fail(QStringLiteral("识别结果超过 5 MB 上限，未缓存。")); return;
+    }
     const QByteArray contents = draft.readAll();
     draft.close();
     const auto lines = contents.size() <= 5 * 1024 * 1024
@@ -386,7 +407,9 @@ void TranscriptionService::processFinished(int exitCode, QProcess::ExitStatus ex
     if (!cache.open(QIODevice::WriteOnly) || cache.write(contents) != contents.size() || !cache.commit()) {
         fail(QStringLiteral("无法保存转写草稿缓存。")); return;
     }
-    m_workspace.reset();
+    resetWorkspace();
+    pruneTranscriptionCache(QFileInfo(m_cachePath).absolutePath(), m_cachePath,
+                            QSettings(QSettings::UserScope, "Clair", "ClairDesktop"));
     setResult(QUrl::fromLocalFile(m_cachePath));
     setPhase(Phase::Idle);
     setStatus(QStringLiteral("离线转写完成：待校对草稿，可能存在错词或幻觉。"));
@@ -399,7 +422,7 @@ void TranscriptionService::fail(const QString &message)
     setPhase(Phase::Idle);
     if (oldPhase == Phase::Conversion) m_decoder.stop();
     m_waveFile.close();
-    m_workspace.reset();
+    resetWorkspace();
     setStatus(message);
 }
 
@@ -410,7 +433,7 @@ void TranscriptionService::cancel()
         setPhase(Phase::Idle);
         m_decoder.stop();
         m_waveFile.close();
-        m_workspace.reset();
+        resetWorkspace();
         setStatus(QStringLiteral("已取消离线转写。"));
         return;
     }

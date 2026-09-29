@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ClairDesktop VERSION 0.3.7 LANGUAGES CXX)
+project(ClairDesktop VERSION 0.3.9 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -28,6 +28,8 @@ qt_add_executable(clair-desktop
     src/fingerprintservice.h
     src/transcriptionservice.cpp
     src/transcriptionservice.h
+    src/transcriptioncache.cpp
+    src/transcriptioncache.h
     src/sharedstate.cpp
     src/sharedstate.h
 )
@@ -130,6 +132,7 @@ if(BUILD_TESTING)
     add_test(NAME fingerprint-service COMMAND clair-fingerprint-tests)
     qt_add_executable(clair-transcription-tests
         tests/transcriptionservice_test.cpp src/transcriptionservice.cpp src/transcriptionservice.h
+        src/transcriptioncache.cpp src/transcriptioncache.h
         src/lyricsparser.cpp src/lyricsparser.h)
     target_link_libraries(clair-transcription-tests PRIVATE Qt6::Multimedia Qt6::Test)
     add_test(NAME transcription-service COMMAND clair-transcription-tests)

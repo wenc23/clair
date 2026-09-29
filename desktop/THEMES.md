@@ -1,6 +1,6 @@
 # Desktop image themes
 
-The native app accepts either **1–3 local images** or a prepared `manifest.json` theme pack. Its three fixed slots are `background` (1920×1080), `cover` (600×600), and `sidebar` (480×1080). For image-group import, selected-file order maps to these slots; a missing slot reuses the last image. The editor automatically center-crops first, then lets the user drag an aspect-locked selection and change its size. Every output is a PNG of the exact slot dimensions.
+The native app accepts either **1–3 local images** or a prepared `manifest.json` theme pack. The AI theme button first opens a copyable prompt and explains the package structure; its dialog then offers the manifest import action. Its three fixed slots are `background` (1920×1080), `cover` (600×600), and `sidebar` (480×1080). For image-group import, selected-file order maps to these slots; a missing slot reuses the last image. The editor automatically center-crops first, then lets the user drag an aspect-locked selection and change its size. Every output is a PNG of the exact slot dimensions.
 
 The portable Windows build accepts PNG, JPEG/JPG and BMP originals. These are input formats; cropped theme assets are saved as PNG without changing originals. WebP/HEIC are not advertised because the bundled Qt runtime does not include the required image plugins.
 

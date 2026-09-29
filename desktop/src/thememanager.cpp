@@ -195,9 +195,25 @@ bool ThemeManager::createTheme(const QString &name, const QVariantList &files)
     for (int i = 0; i < files.size(); ++i) {
         const QUrl url = files.at(i).toUrl();
         const QFileInfo info(url.toLocalFile());
-        if (!url.isLocalFile() || !info.isFile() || info.size() > 100 * 1024 * 1024 ||
-            QImageReader::imageFormat(info.filePath()).isEmpty()) {
-            setError(QStringLiteral("存在不支持或过大的图片：") + info.fileName());
+        const QString position = QStringLiteral("第 %1 张图片").arg(i + 1);
+        if (!url.isLocalFile() || info.filePath().isEmpty()) {
+            setError(position + QStringLiteral("的本地路径没有传到导入程序。请重新选择本机图片；如仍出现请反馈文件路径。"));
+            QDir(stage).removeRecursively();
+            return false;
+        }
+        if (!info.isFile()) {
+            setError(position + QStringLiteral("不存在或无法访问：") + info.filePath());
+            QDir(stage).removeRecursively();
+            return false;
+        }
+        if (info.size() > 100 * 1024 * 1024) {
+            setError(position + QStringLiteral("超过 100 MB 上限：") + info.fileName());
+            QDir(stage).removeRecursively();
+            return false;
+        }
+        if (QImageReader::imageFormat(info.filePath()).isEmpty()) {
+            setError(position + QStringLiteral("无法解码：") + info.fileName()
+                     + QStringLiteral("。当前支持 PNG、JPG/JPEG、BMP；WebP/HEIC 或损坏的图片暂不能导入。"));
             QDir(stage).removeRecursively();
             return false;
         }

@@ -15,7 +15,7 @@ private slots:
     void searchesLrclibWhenRequested();
     void findsSongDespiteVideoFilename();
     void ignoresOldHallucinatedDraftCache();
-    void adjustsOneLineWithoutEditingOriginalLrc();
+    void shiftsWholeSongWithoutEditingOriginalLrc();
 };
 
 void LyricsServiceTest::loadsMatchingLocalLrcAndManualFile()
@@ -114,7 +114,7 @@ void LyricsServiceTest::ignoresOldHallucinatedDraftCache()
     QVERIFY(QFile::exists(draftPath)); // The user's cache file is not deleted.
 }
 
-void LyricsServiceTest::adjustsOneLineWithoutEditingOriginalLrc()
+void LyricsServiceTest::shiftsWholeSongWithoutEditingOriginalLrc()
 {
     QTemporaryDir temporary;
     QVERIFY(temporary.isValid());
@@ -133,12 +133,21 @@ void LyricsServiceTest::adjustsOneLineWithoutEditingOriginalLrc()
     lyrics.loadForTrack(QUrl::fromLocalFile(audioPath));
     QCOMPARE(lyrics.lines().first().toMap().value("sourceIndex").toInt(), 0);
     QVERIFY(lyrics.adjustLineTime(0, 4000));
-    QCOMPARE(lyrics.lines().first().toMap().value("text").toString(), QStringLiteral("second"));
-    QCOMPARE(lyrics.lineAtPosition(3500), QStringLiteral("second"));
+    QCOMPARE(lyrics.lines().first().toMap().value("timeMs").toLongLong(), 4000);
+    QCOMPARE(lyrics.lines().last().toMap().value("timeMs").toLongLong(), 6000);
+    QCOMPARE(lyrics.lines().last().toMap().value("timeMs").toLongLong() -
+             lyrics.lines().first().toMap().value("timeMs").toLongLong(), 2000);
+    QCOMPARE(lyrics.lineAtPosition(3500), QString());
+    QCOMPARE(lyrics.lineAtPosition(4500), QStringLiteral("first"));
     lyrics.loadForTrack(QUrl::fromLocalFile(audioPath));
-    QCOMPARE(lyrics.lines().last().toMap().value("timeMs").toLongLong(), 4000);
-    QVERIFY(lyrics.resetLineTime(0));
+    QCOMPARE(lyrics.lines().last().toMap().value("timeMs").toLongLong(), 6000);
+    // Re-anchoring a different sentence still moves the entire timeline.
+    QVERIFY(lyrics.adjustLineTime(1, 1000));
+    QCOMPARE(lyrics.lines().first().toMap().value("timeMs").toLongLong(), -1000);
+    QCOMPARE(lyrics.lines().last().toMap().value("timeMs").toLongLong(), 1000);
+    QVERIFY(lyrics.resetTimingOffset());
     QCOMPARE(lyrics.lines().first().toMap().value("timeMs").toLongLong(), 1000);
+    QCOMPARE(lyrics.lines().last().toMap().value("timeMs").toLongLong(), 3000);
     QVERIFY(!lyrics.adjustLineTime(10, 1000));
     QVERIFY(!lyrics.adjustLineTime(0, -1));
     QVERIFY(lrc.open(QIODevice::ReadOnly));
@@ -148,6 +157,12 @@ void LyricsServiceTest::adjustsOneLineWithoutEditingOriginalLrc()
         QCryptographicHash::hash(audioPath.toUtf8(), QCryptographicHash::Sha256).toHex())
         + QLatin1Char('/') + QString::fromLatin1(
             QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex());
+    // A single correction written by 0.3.7 becomes a whole-song offset.
+    QSettings(QSettings::UserScope, "Clair", "ClairDesktop")
+        .setValue(timingKey, QVariantMap{{"0", 4000}});
+    lyrics.loadForTrack(QUrl::fromLocalFile(audioPath));
+    QCOMPARE(lyrics.lines().first().toMap().value("timeMs").toLongLong(), 4000);
+    QCOMPARE(lyrics.lines().last().toMap().value("timeMs").toLongLong(), 6000);
     QSettings(QSettings::UserScope, "Clair", "ClairDesktop").remove(timingKey);
 }
 

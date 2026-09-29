@@ -47,18 +47,20 @@ ApplicationWindow {
     }
 
     function formatLyricTime(milliseconds) {
-        const ms = Math.max(0, Math.floor(milliseconds))
+        const sign = milliseconds < 0 ? "-" : ""
+        const ms = Math.abs(Math.floor(milliseconds))
         const minutes = Math.floor(ms / 60000)
         const seconds = Math.floor((ms % 60000) / 1000)
         const centiseconds = Math.floor((ms % 1000) / 10)
-        return minutes + ":" + String(seconds).padStart(2, "0") + "." + String(centiseconds).padStart(2, "0")
+        return sign + minutes + ":" + String(seconds).padStart(2, "0") + "." + String(centiseconds).padStart(2, "0")
     }
 
     function parseLyricTime(value) {
-        const match = /^(\d{1,3}):([0-5]\d)(?:\.(\d{1,2}))?$/.exec(value.trim())
+        const match = /^(-?)(\d{1,3}):([0-5]\d)(?:\.(\d{1,2}))?$/.exec(value.trim())
         if (!match) return -1
-        return Number(match[1]) * 60000 + Number(match[2]) * 1000
-               + Number((match[3] || "0").padEnd(2, "0")) * 10
+        const time = Number(match[2]) * 60000 + Number(match[3]) * 1000
+                     + Number((match[4] || "0").padEnd(2, "0")) * 10
+        return match[1] === "-" ? -time : time
     }
 
     function openLyricTiming(row) {
@@ -368,7 +370,7 @@ ApplicationWindow {
         property int sourceIndex: -1
         property string lyricText: ""
         property string errorText: ""
-        title: "调整这行歌词的时间"
+        title: "以这句为锚点整体校时"
         modal: true
         anchors.centerIn: parent
         width: Math.min(window.width - 60, 500)
@@ -377,7 +379,7 @@ ApplicationWindow {
             width: lineTimeDialog.width - 40
             spacing: 10
             Label { Layout.fillWidth: true; text: lineTimeDialog.lyricText; wrapMode: Text.Wrap; font.pixelSize: 18 }
-            Label { text: "这行开始出现的时间（分:秒.百分秒）"; color: "#aab0b9" }
+            Label { text: "这句开始唱的时间（分:秒.百分秒）"; color: "#aab0b9" }
             RowLayout {
                 Layout.fillWidth: true
                 TextField { id: lyricTimeInput; Layout.fillWidth: true; placeholderText: "例如 1:23.45" }
@@ -389,7 +391,7 @@ ApplicationWindow {
             }
             Label {
                 Layout.fillWidth: true
-                text: lineTimeDialog.errorText || "只调整这一行；如需调整其他行，分别右键对应歌词。原 LRC 不会被改写。"
+                text: lineTimeDialog.errorText || "保存后整首歌词一起平移，所有句子的相对间隔保持不变；原 LRC 不会被改写。"
                 color: lineTimeDialog.errorText ? "#ff8c82" : "#aab0b9"
                 wrapMode: Text.Wrap
             }
@@ -409,9 +411,9 @@ ApplicationWindow {
                     }
                 }
                 Button {
-                    text: "恢复这一行原时间"
+                    text: "恢复整首原时间"
                     onClicked: {
-                        if (lyrics.resetLineTime(lineTimeDialog.sourceIndex)) lineTimeDialog.close()
+                        if (lyrics.resetTimingOffset()) lineTimeDialog.close()
                         else lineTimeDialog.errorText = lyrics.status
                     }
                 }

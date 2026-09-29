@@ -4,6 +4,7 @@
 #include <QAudioBuffer>
 #include <QAudioDecoder>
 #include <QFile>
+#include <QLockFile>
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QUrl>
@@ -56,6 +57,7 @@ private:
     bool appendPcmSample(double value, QByteArray &output);
     void startRecognition();
     void processFinished(int exitCode, QProcess::ExitStatus exitStatus);
+    void resetWorkspace();
     QString cacheKey(const QString &audioPath) const;
     static bool validTool(const QString &path);
 
@@ -74,6 +76,7 @@ private:
     double m_resampleSum = 0.0;
     QProcess m_process;
     std::unique_ptr<QTemporaryDir> m_workspace;
+    std::unique_ptr<QLockFile> m_workspaceLock;
     QByteArray m_errorTail;
     Phase m_phase = Phase::Idle;
 };

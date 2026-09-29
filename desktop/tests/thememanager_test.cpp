@@ -16,6 +16,7 @@ private slots:
     void cropRejectsInvalidGeometry();
     void importPackRebuildsOutputsAndRejectsTraversal();
     void importsExternalSkillPackWhenRequested();
+    void importsOptionalRealImage();
 };
 
 static QString makeImage(const QString &directory, const QString &name, const QColor &color)
@@ -67,8 +68,10 @@ void ThemeManagerTest::importsJpegAndBmpOriginals()
     QVERIFY(!jpeg.isEmpty());
     QVERIFY(!bmp.isEmpty());
     ThemeManager manager(QDir(temp.path()).filePath("themes"));
-    QVERIFY2(manager.createTheme("Mixed originals", {QUrl::fromLocalFile(jpeg),
-                                                    QUrl::fromLocalFile(bmp)}),
+    // FileDialog URLs are explicitly serialized by QML before crossing the
+    // QVariantList boundary; exercise the same string representation here.
+    QVERIFY2(manager.createTheme("Mixed originals", {QUrl::fromLocalFile(jpeg).toString(),
+                                                    QUrl::fromLocalFile(bmp).toString()}),
              qPrintable(manager.errorString()));
     const QDir saved(QDir(temp.path()).filePath("themes/" + manager.activeThemeId()));
     QVERIFY(QFile::exists(saved.filePath("original-0.jpg")));
@@ -76,6 +79,10 @@ void ThemeManagerTest::importsJpegAndBmpOriginals()
     QCOMPARE(QImage(manager.backgroundUrl().toLocalFile()).size(), QSize(1920, 1080));
     QCOMPARE(QImage(manager.coverUrl().toLocalFile()).size(), QSize(600, 600));
     QCOMPARE(QImage(manager.sidebarUrl().toLocalFile()).size(), QSize(480, 1080));
+
+    QVERIFY(!manager.createTheme("Missing", {QStringLiteral("https://example.com/test.jpg")}));
+    QVERIFY(manager.errorString().contains(QStringLiteral("第 1 张图片")));
+    QVERIFY(manager.errorString().contains(QStringLiteral("本地路径")));
 }
 
 void ThemeManagerTest::cropRejectsInvalidGeometry()
@@ -138,6 +145,24 @@ void ThemeManagerTest::importsExternalSkillPackWhenRequested()
     QCOMPARE(QImage(manager.backgroundUrl().toLocalFile()).size(), QSize(1920, 1080));
     QCOMPARE(QImage(manager.coverUrl().toLocalFile()).size(), QSize(600, 600));
     QCOMPARE(QImage(manager.sidebarUrl().toLocalFile()).size(), QSize(480, 1080));
+}
+
+void ThemeManagerTest::importsOptionalRealImage()
+{
+    const QString source = qEnvironmentVariable("CLAIR_TEST_THEME_IMAGE");
+    if (source.isEmpty()) QSKIP("Set CLAIR_TEST_THEME_IMAGE to verify a real image read-only.");
+    QFile original(source);
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    const QByteArray before = original.readAll();
+    original.close();
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    ThemeManager manager(QDir(temp.path()).filePath("themes"));
+    QVERIFY2(manager.createTheme("Real JPEG", {QUrl::fromLocalFile(source).toString()}),
+             qPrintable(manager.errorString()));
+    QCOMPARE(QImage(manager.backgroundUrl().toLocalFile()).size(), QSize(1920, 1080));
+    QVERIFY(original.open(QIODevice::ReadOnly));
+    QCOMPARE(original.readAll(), before);
 }
 
 QTEST_GUILESS_MAIN(ThemeManagerTest)

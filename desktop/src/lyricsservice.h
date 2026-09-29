@@ -2,10 +2,12 @@
 
 #include <QObject>
 #include <QNetworkAccessManager>
-#include <QHash>
+#include <QPointer>
 #include <QVariantList>
 
 #include "lyricsparser.h"
+
+class QNetworkReply;
 
 class LyricsService final : public QObject {
     Q_OBJECT
@@ -24,7 +26,7 @@ public:
     Q_INVOKABLE void search(const QString &title, const QString &artist, qint64 durationMs = 0);
     Q_INVOKABLE void chooseCandidate(int index);
     Q_INVOKABLE bool adjustLineTime(int sourceIndex, qint64 timeMs);
-    Q_INVOKABLE bool resetLineTime(int sourceIndex);
+    Q_INVOKABLE bool resetTimingOffset();
     Q_INVOKABLE QString lineAtPosition(qint64 positionMs) const;
     Q_INVOKABLE int lineIndexAtPosition(qint64 positionMs) const;
 signals:
@@ -36,15 +38,17 @@ private:
     void setStatus(const QString &status);
     QString keyForCurrentTrack() const;
     void applyLineTimes();
-    bool saveLineTimes();
+    bool saveTimingOffset();
     void requestSearch(const QString &title, const QString &artist, qint64 durationMs,
                        bool broad, quint64 generation);
+    void cancelPendingSearch();
 
     QNetworkAccessManager m_network;
+    QPointer<QNetworkReply> m_activeReply;
     QVector<LrcLine> m_lines;
     QVector<LrcLine> m_originalLines;
     QVector<int> m_sourceIndices;
-    QHash<int, qint64> m_lineTimes;
+    qint64 m_offsetMs = 0;
     QString m_timingKey;
     QString m_plainText;
     QString m_trackPath;
