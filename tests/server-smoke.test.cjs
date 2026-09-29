@@ -85,6 +85,10 @@ test("白名单静态文件带正确 Content-Type 与 no-store", async () => {
   assert.match(app.headers["content-type"] || "", /text\/javascript/);
   assert.equal(app.headers["cache-control"], "no-store", "app.js 应禁止缓存");
 
+  const shared = await request("/shared-state-web.js");
+  assert.equal(shared.status, 200, "共享状态模块应可访问");
+  assert.match(shared.headers["content-type"] || "", /text\/javascript/);
+
   const css = await request("/styles.css");
   assert.equal(css.status, 200, "styles.css 应可访问");
   assert.match(css.headers["content-type"] || "", /text\/css/);

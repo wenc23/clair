@@ -1,6 +1,6 @@
 # 内置离线歌词转写（预览）
 
-Windows/Linux 0.3.3 试用包自带 CPU 版 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) `whisper-cli` 和多语种 `ggml-tiny-q5_1.bin`（约 32 MB）。用户在“歌词”页点击“离线转写”→“开始转写”即可；无需自行选择 FFmpeg、程序或模型。识别只在用户主动触发时运行，不上传音频。未打包的开发构建仍可在“高级设置”中自选程序和模型。
+Windows/Linux 0.3.6 试用包自带 CPU 版 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) `whisper-cli` 和多语种 `ggml-tiny-q5_1.bin`（约 32 MB）。用户在“歌词”页点击“离线转写”→“开始转写”即可；无需自行选择 FFmpeg、程序或模型。识别只在用户主动触发时运行，不上传音频。未打包的开发构建仍可在“高级设置”中自选程序和模型。
 
 应用使用已有 Qt Multimedia/FFmpeg 媒体后端的 `QAudioDecoder` 在本机把音频转换成 16 kHz、单声道、16-bit PCM WAV，再异步调用 `whisper-cli` 生成行级 LRC。这样不额外分发一份 FFmpeg 命令行程序。成功结果缓存于用户缓存目录；输入音频、模型或识别程序变化后缓存失效。任务可取消，退出时终止子进程。不会修改原音频、同目录 LRC 或 Web 版曲库。
 

@@ -14,6 +14,8 @@
 #include <QStandardPaths>
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace {
 QString localPath(const QUrl &url) { return url.isLocalFile() ? url.toLocalFile() : QString(); }
@@ -49,13 +51,20 @@ TranscriptionService::TranscriptionService(QObject *parent) : QObject(parent)
     const QString customModel = settings.value("transcription/model").toString();
     m_whisperPath = validTool(customWhisper) ? customWhisper : bundledWhisper();
     m_modelPath = QFileInfo(customModel).isFile() ? customModel : bundledModel();
-    QAudioFormat format;
-    format.setSampleRate(16000);
-    format.setChannelCount(1);
-    format.setSampleFormat(QAudioFormat::Int16);
-    m_decoder.setAudioFormat(format);
+    // Requesting 16 kHz/mono here is not portable: some FFmpeg-backed Qt
+    // decoders finish successfully without producing any buffer. Decode at
+    // the source format and convert the PCM ourselves instead.
     connect(&m_decoder, &QAudioDecoder::bufferReady, this, &TranscriptionService::decoderBufferReady);
     connect(&m_decoder, &QAudioDecoder::finished, this, &TranscriptionService::decoderFinished);
+    connect(&m_decoder, &QAudioDecoder::positionChanged, this, [this](qint64 position) {
+        const qint64 duration = m_decoder.duration();
+        if (m_phase != Phase::Conversion || duration <= 0) return;
+        const int percent = int(std::clamp(position * 100 / duration, qint64(0), qint64(99)));
+        if (percent / 5 != m_lastDecodePercent / 5) {
+            m_lastDecodePercent = percent;
+            setStatus(QStringLiteral("正在本机解码音频… %1%").arg(percent));
+        }
+    });
     connect(&m_decoder, QOverload<QAudioDecoder::Error>::of(&QAudioDecoder::error), this,
             [this](QAudioDecoder::Error) {
                 if (m_phase == Phase::Conversion)
@@ -184,12 +193,16 @@ void TranscriptionService::transcribe(const QUrl &audioFile)
     m_workspace = std::make_unique<QTemporaryDir>(QDir(cacheDir).filePath("job-XXXXXX"));
     if (!m_workspace->isValid()) { fail(QStringLiteral("无法创建临时转写目录。")); return; }
     m_pcmBytes = 0;
+    m_inputSampleRate = 0;
+    m_lastDecodePercent = -1;
+    m_resamplePhase = 0.0;
+    m_resampleSum = 0.0;
     m_waveFile.setFileName(m_workspace->filePath("audio.wav"));
     if (!m_waveFile.open(QIODevice::WriteOnly) || m_waveFile.write(QByteArray(44, '\0')) != 44) {
         fail(QStringLiteral("无法创建临时 WAV 文件。")); return;
     }
     setPhase(Phase::Conversion);
-    setStatus(QStringLiteral("正在本机解码音频（16 kHz 单声道）…"));
+    setStatus(QStringLiteral("正在本机解码并转换为 16 kHz 单声道…"));
     m_decoder.setSource(audioFile);
     m_decoder.start();
 }
@@ -198,25 +211,89 @@ void TranscriptionService::decoderBufferReady()
 {
     if (m_phase != Phase::Conversion) return;
     const QAudioBuffer buffer = m_decoder.read();
+    if (!appendDecodedBuffer(buffer))
+        fail(QStringLiteral("音频 PCM 格式不受支持，无法转换为转写所需的 16 kHz 单声道。"));
+}
+
+bool TranscriptionService::appendPcmSample(double value, QByteArray &output)
+{
+    const double step = 16000.0 / m_inputSampleRate;
+    double remaining = step;
+    while (remaining > 1e-9) {
+        const double portion = std::min(remaining, 1.0 - m_resamplePhase);
+        m_resampleSum += value * portion;
+        m_resamplePhase += portion;
+        remaining -= portion;
+        if (m_resamplePhase >= 1.0 - 1e-9) {
+            const qint16 sample = qint16(std::clamp(m_resampleSum, -1.0, 1.0) * 32767.0);
+            output.append(char(quint16(sample) & 0xff));
+            output.append(char((quint16(sample) >> 8) & 0xff));
+            m_resamplePhase = 0.0;
+            m_resampleSum = 0.0;
+        }
+    }
+    return true;
+}
+
+bool TranscriptionService::appendDecodedBuffer(const QAudioBuffer &buffer)
+{
     const auto format = buffer.format();
-    if (!buffer.isValid() || format.sampleRate() != 16000 || format.channelCount() != 1 ||
-        format.sampleFormat() != QAudioFormat::Int16) {
-        fail(QStringLiteral("音频解码器未提供 16 kHz 单声道 PCM；该音频暂不支持离线转写。"));
-        return;
+    if (!buffer.isValid() || format.sampleRate() <= 0 || format.channelCount() <= 0 ||
+        format.bytesPerSample() <= 0 || buffer.frameCount() <= 0)
+        return false;
+    if (m_inputSampleRate == 0) m_inputSampleRate = format.sampleRate();
+    if (m_inputSampleRate != format.sampleRate()) return false;
+
+    const int channels = format.channelCount();
+    QByteArray converted;
+    converted.reserve(int(double(buffer.frameCount()) * 32000.0 / m_inputSampleRate) + 8);
+    const auto *data = buffer.constData<quint8>();
+    const int sampleBytes = format.bytesPerSample();
+    for (int frame = 0; frame < buffer.frameCount(); ++frame) {
+        double mono = 0.0;
+        for (int channel = 0; channel < channels; ++channel) {
+            const auto *sample = data + (frame * channels + channel) * sampleBytes;
+            double value = 0.0;
+            switch (format.sampleFormat()) {
+            case QAudioFormat::UInt8: value = (double(*sample) - 128.0) / 128.0; break;
+            case QAudioFormat::Int16: {
+                const qint16 s = qint16(quint16(sample[0]) | (quint16(sample[1]) << 8));
+                value = double(s) / 32768.0; break;
+            }
+            case QAudioFormat::Int32: {
+                const quint32 bits = quint32(sample[0]) | (quint32(sample[1]) << 8)
+                                     | (quint32(sample[2]) << 16) | (quint32(sample[3]) << 24);
+                value = double(qint32(bits)) / 2147483648.0; break;
+            }
+            case QAudioFormat::Float: {
+                float s;
+                static_assert(sizeof(s) == 4);
+                std::memcpy(&s, sample, 4);
+                value = std::isfinite(s) ? double(s) : 0.0; break;
+            }
+            default: return false;
+            }
+            mono += value;
+        }
+        appendPcmSample(mono / channels, converted);
     }
-    const qint64 bytes = buffer.byteCount();
-    if (bytes <= 0 || m_pcmBytes + quint64(bytes) > 0xFFFFFFFFull - 36ull ||
-        m_waveFile.write(buffer.constData<char>(), bytes) != bytes) {
-        fail(QStringLiteral("写入临时音频失败或曲目过长。"));
-        return;
-    }
-    m_pcmBytes += quint64(bytes);
+    if (m_pcmBytes + quint64(converted.size()) > 0xFFFFFFFFull - 36ull ||
+        m_waveFile.write(converted) != converted.size())
+        return false;
+    m_pcmBytes += quint64(converted.size());
+    return true;
 }
 
 void TranscriptionService::decoderFinished()
 {
     if (m_phase != Phase::Conversion) return;
-    if (m_pcmBytes == 0) { fail(QStringLiteral("音频解码结果为空。")); return; }
+    while (m_decoder.bufferAvailable() && m_phase == Phase::Conversion)
+        decoderBufferReady();
+    if (m_phase != Phase::Conversion) return;
+    if (m_pcmBytes == 0) {
+        fail(QStringLiteral("音频解码未产生 PCM 数据；请确认文件能正常播放，或尝试转换为 WAV 后重试。"));
+        return;
+    }
     QByteArray header;
     QDataStream stream(&header, QIODevice::WriteOnly);
     stream.setByteOrder(QDataStream::LittleEndian);

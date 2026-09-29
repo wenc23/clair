@@ -67,7 +67,7 @@ if (Test-Path -LiteralPath $skillSource -PathType Container) {
 }
 $webOut = Join-Path $outputFull 'web'
 New-Item -ItemType Directory -Path $webOut | Out-Null
-foreach ($name in @('index.html', 'styles.css', 'app.js', 'flac-metadata.js', 'library-model.js', 'theme-model.js')) {
+foreach ($name in @('index.html', 'styles.css', 'app.js', 'flac-metadata.js', 'library-model.js', 'theme-model.js', 'shared-state-web.js')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\$name") -Destination $webOut
 }
 $licenseOut = Join-Path $outputFull 'licenses'

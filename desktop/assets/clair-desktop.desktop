@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Clair Desktop
+Comment=Native local music player
+Exec=clair-desktop
+Icon=clair-desktop
+Categories=Audio;AudioVideo;Player;
+Terminal=false

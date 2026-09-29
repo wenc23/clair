@@ -12,7 +12,7 @@ namespace {
 constexpr qsizetype kMaxRequestBytes = 8192;
 const QSet<QByteArray> kPublicFiles {
     "index.html", "styles.css", "app.js", "flac-metadata.js",
-    "library-model.js", "theme-model.js",
+    "library-model.js", "theme-model.js", "shared-state-web.js",
 };
 
 QByteArray statusLine(int status)

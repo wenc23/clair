@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ClairDesktop VERSION 0.3.3 LANGUAGES CXX)
+project(ClairDesktop VERSION 0.3.6 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -28,14 +28,28 @@ qt_add_executable(clair-desktop
     src/fingerprintservice.h
     src/transcriptionservice.cpp
     src/transcriptionservice.h
+    src/sharedstate.cpp
+    src/sharedstate.h
 )
+qt_add_resources(clair-desktop clair-brand PREFIX "/"
+    FILES assets/clair-icon.png)
+if(WIN32)
+    target_sources(clair-desktop PRIVATE assets/clair-icon.rc)
+endif()
+if(APPLE)
+    set_source_files_properties(assets/clair-icon.icns PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources")
+    target_sources(clair-desktop PRIVATE assets/clair-icon.icns)
+    set_target_properties(clair-desktop PROPERTIES
+        MACOSX_BUNDLE_ICON_FILE clair-icon.icns)
+endif()
 target_compile_definitions(clair-desktop PRIVATE
     CLAIR_WEB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 qt_add_qml_module(clair-desktop
     URI Clair
     VERSION 1.0
-    QML_FILES qml/Main.qml qml/ThemeEditor.qml
+    QML_FILES qml/Main.qml qml/ThemeEditor.qml qml/NowPlaying.qml
 )
 
 target_link_libraries(clair-desktop PRIVATE
@@ -54,6 +68,11 @@ set_target_properties(clair-desktop PROPERTIES
 # Native deployment for macOS/Linux (and an alternative to package-windows.ps1).
 # Playback remains independent of these optional Web assets.
 install(TARGETS clair-desktop BUNDLE DESTINATION . RUNTIME DESTINATION bin)
+if(UNIX AND NOT APPLE)
+    install(FILES assets/clair-icon.png
+        DESTINATION share/icons/hicolor/256x256/apps RENAME clair-desktop.png)
+    install(FILES assets/clair-desktop.desktop DESTINATION share/applications)
+endif()
 if(APPLE)
     set(CLAIR_WEB_INSTALL_DIR "clair-desktop.app/Contents/MacOS/web")
 else()
@@ -66,6 +85,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/../flac-metadata.js"
     "${CMAKE_CURRENT_SOURCE_DIR}/../library-model.js"
     "${CMAKE_CURRENT_SOURCE_DIR}/../theme-model.js"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../shared-state-web.js"
     DESTINATION "${CLAIR_WEB_INSTALL_DIR}")
 qt_generate_deploy_qml_app_script(TARGET clair-desktop OUTPUT_SCRIPT clair_deploy_script)
 install(SCRIPT "${clair_deploy_script}")
@@ -113,6 +133,10 @@ if(BUILD_TESTING)
         src/lyricsparser.cpp src/lyricsparser.h)
     target_link_libraries(clair-transcription-tests PRIVATE Qt6::Multimedia Qt6::Test)
     add_test(NAME transcription-service COMMAND clair-transcription-tests)
+    qt_add_executable(clair-shared-state-tests
+        tests/sharedstate_test.cpp src/sharedstate.cpp src/sharedstate.h)
+    target_link_libraries(clair-shared-state-tests PRIVATE Qt6::Test)
+    add_test(NAME shared-state COMMAND clair-shared-state-tests)
     add_test(NAME desktop-startup COMMAND clair-desktop --smoke)
     set_tests_properties(desktop-startup PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)
 endif()

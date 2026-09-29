@@ -61,6 +61,7 @@ public:
     Q_INVOKABLE QString titleAt(int index) const;
     Q_INVOKABLE QString artistAt(int index) const;
     Q_INVOKABLE QString albumAt(int index) const;
+    Q_INVOKABLE QString syncKeyAt(int index) const;
     Q_INVOKABLE QString groupAt(int index, const QString &kind) const;
     Q_INVOKABLE bool editTrack(int index, const QString &title, const QString &artist);
     Q_INVOKABLE bool renameTrackFile(int index, const QString &baseName);

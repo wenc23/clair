@@ -8,7 +8,7 @@ const appRoot = path.resolve(__dirname);
 const musicRoot = path.resolve(process.argv[2] || process.env.CLAIR_MUSIC_DIR || "");
 const port = Number(process.env.CLAIR_PORT) || 8000;
 const host = process.env.CLAIR_HOST || "0.0.0.0";
-const publicFiles = new Set(["index.html", "styles.css", "app.js", "flac-metadata.js", "library-model.js", "theme-model.js"]);
+const publicFiles = new Set(["index.html", "styles.css", "app.js", "flac-metadata.js", "library-model.js", "theme-model.js", "shared-state-web.js"]);
 const audioExtensions = new Set([".flac", ".wav", ".wave", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".aif", ".aiff"]);
 const contentTypes = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",

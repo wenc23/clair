@@ -38,6 +38,7 @@ void WebServerTest::servesBundledPageAndAllowlistedAssets()
     QCOMPARE(home.first, 200);
     QVERIFY(home.second.contains("Clair"));
     QCOMPARE(fetch("/app.js").first, 200);
+    QCOMPARE(fetch("/shared-state-web.js").first, 200);
     QCOMPARE(fetch("/index.html", true).first, 200);
     QCOMPARE(fetch("/LICENSE").first, 404);
     QCOMPARE(fetch("/%2e%2e%2fLICENSE").first, 404);

@@ -173,6 +173,9 @@
     remoteLibraryName: "",
     shuffle: false,
     repeat: "all",
+    activePlaylist: "",
+    pendingResumeSeconds: null,
+    lastResumeBucket: -1,
     audioContext: null,
     sourceNode: null,
     analyser: null,
@@ -193,6 +196,9 @@
     visualHistoryTime: 0,
     lastVisualizerError: "",
   };
+
+  const shared = { favorites: {}, playlists: [], resume: {}, polling: false, mutating: 0,
+    store: null, migrated: false, lastError: "" };
 
   function loadJSON(key, fallback) {
     try {
@@ -218,6 +224,199 @@
   function loadRecord(key) {
     const value = loadJSON(key, {});
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  }
+
+  function resetSharedState() {
+    shared.store = state.dataDirectory && state.libraryMode === "local"
+      ? new window.ClairSharedState.Store(state.dataDirectory) : null;
+    shared.favorites = {};
+    shared.playlists = [];
+    shared.resume = {};
+    shared.migrated = false;
+    shared.lastError = "";
+    state.activePlaylist = "";
+    renderSharedPlaylists();
+    updateResumeButton();
+  }
+
+  function renderSharedPlaylists() {
+    const select = $("shared-playlist-select");
+    const previous = select.value;
+    select.replaceChildren(...shared.playlists.map((list) => new Option(list.name, list.name)));
+    if (shared.playlists.some((list) => list.name === previous)) select.value = previous;
+    if (state.activePlaylist && !shared.playlists.some((list) => list.name === state.activePlaylist)) {
+      state.activePlaylist = "";
+      renderLibrary();
+    }
+    $("shared-sync-status").textContent = state.dataDirectory
+      ? `共享状态：${state.directory.name} / .Clair · ${shared.playlists.length} 个歌单`
+      : "连接音乐目录后与桌面版同步";
+  }
+
+  function updateResumeButton() {
+    const key = shared.resume.lastPath;
+    const track = state.tracks.find((item) => item.path === key);
+    const button = $("shared-resume");
+    button.classList.toggle("is-hidden", !track);
+    if (track) button.textContent = `继续上次播放 · ${track.title}`;
+  }
+
+  async function refreshSharedState() {
+    const store = shared.store;
+    if (shared.polling || shared.mutating || !store || state.libraryMode !== "local") return;
+    shared.polling = true;
+    try {
+      await store.idle();
+      let revision = store.revision;
+      const current = () => shared.store === store && state.libraryMode === "local" &&
+        !shared.mutating && store.revision === revision;
+      if (!current()) return;
+      let favorites = await store.read("favorites.json");
+      if (!current()) return;
+      if (!favorites) {
+        const seed = { schemaVersion: 1, tracks: Object.fromEntries(state.tracks
+          .filter((track) => track.favorite).map((track) => [track.path, true])) };
+        await store.mutate("favorites.json", (existing) => existing || seed);
+        revision = store.revision;
+        if (!current()) return;
+        favorites = await store.read("favorites.json");
+      }
+      if (!current()) return;
+      let values = favorites.tracks;
+      let changed = false;
+      // Old Web localStorage may be newer than the old library index. Migrate
+      // its positive favorites once per connected root, not on every poll.
+      if (!shared.migrated) {
+        const missing = state.tracks.filter((track) => track.favorite && !(track.path in values));
+        if (missing.length) {
+          await store.mutate("favorites.json", (existing) => {
+            const tracks = { ...(existing || { tracks: {} }).tracks };
+            for (const track of missing) if (!(track.path in tracks)) tracks[track.path] = true;
+            return { schemaVersion: 1, tracks };
+          });
+          revision = store.revision;
+          if (!current()) return;
+          favorites = await store.read("favorites.json");
+          values = favorites.tracks;
+        }
+        if (state.tracks.length) shared.migrated = true;
+      }
+      if (!current()) return;
+      for (const track of state.tracks) {
+        if (track.path in values && track.favorite !== Boolean(values[track.path])) {
+          track.favorite = Boolean(values[track.path]);
+          state.metadata[track.id] = { ...(state.metadata[track.id] || {}), favorite: track.favorite };
+          changed = true;
+        }
+      }
+      shared.favorites = values;
+      if (changed) {
+        saveJSON("clair-metadata", state.metadata);
+        writeLocalLibraryIndex();
+        renderLibrary();
+        if (currentTrack()) updateNowPlaying(currentTrack());
+      }
+      const playlists = await store.read("playlists.json");
+      if (!current()) return;
+      const rawLists = Array.isArray(playlists?.lists) ? playlists.lists : [];
+      const nextLists = rawLists.filter((list) => list && typeof list.name === "string" && Array.isArray(list.paths))
+        .map((list) => ({ name: list.name, paths: list.paths.filter((path) => typeof path === "string") }));
+      if (JSON.stringify(nextLists) !== JSON.stringify(shared.playlists)) {
+        shared.playlists = nextLists;
+        renderSharedPlaylists();
+        if (state.activePlaylist) renderLibrary();
+      }
+      renderSharedPlaylists();
+      const resume = await store.read("resume.json") || {};
+      if (!current()) return;
+      shared.resume = resume;
+      updateResumeButton();
+      shared.lastError = "";
+    } catch (error) {
+      if (shared.store !== store) return;
+      if (shared.lastError !== error.message) log("error", "sync", "共享状态读取失败", error.message);
+      shared.lastError = error.message;
+      $("shared-sync-status").textContent = `同步失败：${error.message}`;
+    } finally { shared.polling = false; }
+  }
+
+  async function updateSharedFavorite(track) {
+    const store = shared.store;
+    if (!store || state.libraryMode !== "local") return;
+    const key = track.path;
+    const value = Boolean(track.favorite);
+    ++shared.mutating;
+    try {
+      await store.mutate("favorites.json", (current) => ({
+        schemaVersion: 1, tracks: { ...(current?.tracks || {}), [key]: value },
+      }));
+      if (shared.store === store) shared.favorites = (await store.read("favorites.json")).tracks;
+    } catch (error) { log("error", "sync", "收藏未能同步到桌面版", error.message); }
+    finally { --shared.mutating; }
+  }
+
+  async function mutateSharedPlaylist(mutator) {
+    const store = shared.store;
+    if (!store || state.libraryMode !== "local") {
+      log("warn", "sync", "请先连接本地音乐目录，再使用共享歌单"); return false;
+    }
+    ++shared.mutating;
+    try {
+      const changed = await store.mutate("playlists.json", (current) => {
+        const lists = structuredClone(current?.lists || []);
+        return mutator(lists) ? { schemaVersion: 1, lists } : null;
+      });
+      if (changed && shared.store === store) {
+        shared.playlists = (await store.read("playlists.json")).lists;
+        renderSharedPlaylists();
+        if (state.activePlaylist) renderLibrary();
+      }
+      return changed;
+    } catch (error) { log("error", "sync", "共享歌单保存失败", error.message); return false; }
+    finally { --shared.mutating; }
+  }
+
+  async function persistResumeFor(key, positionMs) {
+    const store = shared.store;
+    if (!key || !store || state.libraryMode !== "local") return;
+    const safePosition = Math.max(0, Math.round(positionMs) || 0);
+    ++shared.mutating;
+    try {
+      await store.mutate("resume.json", (current) => ({
+        schemaVersion: 1, lastPath: current?.lastPath || key,
+        bookmarks: { ...(current?.bookmarks || {}), [key]: safePosition },
+        updatedAt: new Date().toISOString(),
+      }));
+      if (shared.store === store) {
+        shared.resume = await store.read("resume.json");
+        updateResumeButton();
+      }
+    } catch (error) { log("warn", "sync", "播放进度未能同步", error.message); }
+    finally { --shared.mutating; }
+  }
+
+  function persistResume() {
+    const key = dom.audio.dataset.trackPath;
+    if (key && currentTrack()?.path === key)
+      return persistResumeFor(key, dom.audio.currentTime * 1000);
+    return Promise.resolve();
+  }
+
+  async function selectSharedResume(key) {
+    const store = shared.store;
+    if (!key || !store || state.libraryMode !== "local") return;
+    ++shared.mutating;
+    try {
+      await store.mutate("resume.json", (current) => ({
+        schemaVersion: 1, lastPath: key,
+        bookmarks: current?.bookmarks || {}, updatedAt: new Date().toISOString(),
+      }));
+      if (shared.store === store) {
+        shared.resume = await store.read("resume.json");
+        updateResumeButton();
+      }
+    } catch (error) { log("warn", "sync", "当前曲目未能同步", error.message); }
+    finally { --shared.mutating; }
   }
 
   function loadLogs() {
@@ -433,6 +632,7 @@
 
   async function initializeLocalData() {
     state.dataDirectory = await state.directory.getDirectoryHandle(DATA_DIRECTORY_NAME, { create: true });
+    resetSharedState();
     await ensureLocalLogFile();
     const [settings, index, localLogs] = await Promise.all([
       readLocalJson(SETTINGS_FILE_NAME, {}),
@@ -1258,6 +1458,7 @@
     dom.navTrackCount.textContent = String(state.tracks.length);
     writeLocalLibraryIndex();
     log("info", "library", "音乐库载入完成", `${state.tracks.length} 首`);
+    await refreshSharedState();
   }
 
   function updateLibraryModeUI() {
@@ -1299,6 +1500,7 @@
       const response = await fetchWithTimeout("/api/library");
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || `\u66f2\u5e93\u8bf7\u6c42\u5931\u8d25\uff08HTTP ${response.status}\uff09`);
+      await persistResume();
       ++state.libraryLoadToken;
       releaseObjectUrls();
       clearPlaybackSource();
@@ -1309,6 +1511,7 @@
       state.dataDirectory = null;
       state.trashMode = false;
       state.libraryMode = "remote";
+      resetSharedState();
       state.remoteLibraryName = payload.libraryName || status.libraryName || "Samba \u97f3\u4e50\u5e93";
       state.tracks = (Array.isArray(payload.tracks) ? payload.tracks : []).map((item) => {
         const tags = {
@@ -1439,11 +1642,13 @@
     }
     try {
       const selectedDirectory = await window.showDirectoryPicker({ mode: "readwrite" });
+      await persistResume();
       await state.localWriteQueue;
       state.directory = selectedDirectory;
       state.libraryMode = "local";
       updateLibraryModeUI();
       state.dataDirectory = null;
+      resetSharedState();
       state.trashMode = false;
       await initializeLocalData();
       await rememberDirectory(state.directory);
@@ -1458,6 +1663,10 @@
   function getFilteredTracks() {
     const query = dom.search.value.trim().toLocaleLowerCase();
     return state.tracks.map((track, index) => ({ track, index })).filter(({ track }) => {
+      if (state.activePlaylist) {
+        const list = shared.playlists.find((item) => item.name === state.activePlaylist);
+        if (!list || !list.paths.includes(track.path)) return false;
+      }
       if (!query) return true;
       return [
         track.title, track.artist, track.conductor, track.orchestra, track.composer,
@@ -1582,15 +1791,21 @@
     return state.tracks[state.currentIndex] || null;
   }
 
-  async function selectTrack(index, autoplay = true) {
+  async function selectTrack(index, autoplay = true, resumeSeconds = null) {
     const track = state.tracks[index];
     if (!track) return;
     const requestId = ++state.playRequestId;
+    const oldKey = dom.audio.dataset.trackPath;
+    if (oldKey) void persistResumeFor(oldKey, dom.audio.currentTime * 1000);
+    clearPlaybackSource({ cancelPending: false });
     state.currentIndex = index;
+    void selectSharedResume(track.path);
+    state.pendingResumeSeconds = resumeSeconds;
+    state.lastResumeBucket = -1;
     updateNowPlaying(track);
+    updateResumeButton();
     // 只更新行高亮，不再整表重建（保留滚动位置）
     markCurrentRow(index);
-    clearPlaybackSource({ cancelPending: false });
     try {
       const file = track.streamUrl ? null : await track.handle.getFile();
       if (requestId !== state.playRequestId) return;
@@ -1837,6 +2052,7 @@
     state.metadata[track.id] = { ...(state.metadata[track.id] || {}), favorite: track.favorite };
     saveJSON("clair-metadata", state.metadata);
     writeLocalLibraryIndex();
+    void updateSharedFavorite(track);
     updateNowPlaying(track);
     patchFavoriteRow(state.currentIndex, track);
     log("info", "library", track.favorite ? "已收藏曲目" : "已取消收藏", track.title);
@@ -2126,6 +2342,33 @@
     }
   }
 
+  async function remapSharedTrack(oldKey, newKey) {
+    const store = shared.store;
+    if (!store || oldKey === newKey) return;
+    try {
+      await store.mutate("favorites.json", (current) => {
+        if (!current || !(oldKey in current.tracks)) return null;
+        const tracks = { ...current.tracks };
+        tracks[newKey] = Boolean(tracks[oldKey]) || Boolean(tracks[newKey]);
+        delete tracks[oldKey];
+        return { schemaVersion: 1, tracks };
+      });
+      await store.mutate("playlists.json", (current) => {
+        if (!current || !current.lists.some((list) => list.paths.includes(oldKey))) return null;
+        return { schemaVersion: 1, lists: current.lists.map((list) => ({ ...list,
+          paths: [...new Set(list.paths.map((path) => path === oldKey ? newKey : path))] })) };
+      });
+      await store.mutate("resume.json", (current) => {
+        if (!current || !(oldKey in current.bookmarks) && current.lastPath !== oldKey) return null;
+        const bookmarks = { ...current.bookmarks };
+        if (oldKey in bookmarks) bookmarks[newKey] = bookmarks[oldKey];
+        delete bookmarks[oldKey];
+        return { ...current, bookmarks, lastPath: current.lastPath === oldKey ? newKey : current.lastPath };
+      });
+      if (shared.store === store) await refreshSharedState();
+    } catch (error) { log("warn", "sync", "文件已重命名，但共享收藏或歌单路径迁移失败", error.message); }
+  }
+
   async function renameCurrent() {
     const track = currentTrack();
     if (!track) return;
@@ -2151,6 +2394,8 @@
       await writer.close();
       copied = true;
       await removeOriginal(track);
+      const newKey = `${track.path.slice(0, -track.fileName.length)}${name}`;
+      await remapSharedTrack(track.path, newKey);
       log("info", "files", "重命名成功", `${track.fileName} → ${name}`);
       await refreshLibrary();
     } catch (error) {
@@ -2792,6 +3037,58 @@
     $("health-check").addEventListener("click", runHealthCheck);
     $("export-m3u").addEventListener("click", exportM3U);
     $("favorite-current").addEventListener("click", toggleFavorite);
+    $("shared-resume").addEventListener("click", () => {
+      const key = shared.resume.lastPath;
+      const index = state.tracks.findIndex((track) => track.path === key);
+      if (index >= 0) selectTrack(index, true, Number(shared.resume.bookmarks?.[key] || 0) / 1000);
+    });
+    $("shared-playlist-create").addEventListener("click", () => {
+      const name = $("shared-playlist-name").value.trim();
+      if (!name || name.length > 64 || /[/\\]/.test(name)) {
+        log("warn", "sync", "歌单名称应为 1–64 字符且不能包含斜杠"); return;
+      }
+      void mutateSharedPlaylist((lists) => {
+        if (lists.some((list) => list.name === name)) return false;
+        lists.push({ name, paths: [] });
+        return true;
+      }).then((created) => {
+        if (created) { $("shared-playlist-select").value = name; $("shared-playlist-name").value = ""; }
+      });
+    });
+    $("shared-playlist-add").addEventListener("click", () => {
+      const name = $("shared-playlist-select").value;
+      const keys = state.tracks.filter((track) => state.selected.has(track.id)).map((track) => track.path);
+      if (!keys.length && currentTrack()) keys.push(currentTrack().path);
+      if (!name || !keys.length) { log("warn", "sync", "先选择歌单和曲目"); return; }
+      void mutateSharedPlaylist((lists) => {
+        const list = lists.find((item) => item.name === name);
+        if (!list) return false;
+        list.paths = [...new Set([...list.paths, ...keys])];
+        return true;
+      });
+    });
+    $("shared-playlist-remove").addEventListener("click", () => {
+      const name = $("shared-playlist-select").value;
+      const keys = state.tracks.filter((track) => state.selected.has(track.id)).map((track) => track.path);
+      if (!keys.length && currentTrack()) keys.push(currentTrack().path);
+      if (!name || !keys.length) { log("warn", "sync", "先选择歌单和曲目"); return; }
+      void mutateSharedPlaylist((lists) => {
+        const list = lists.find((item) => item.name === name);
+        if (!list) return false;
+        list.paths = list.paths.filter((path) => !keys.includes(path));
+        return true;
+      });
+    });
+    $("shared-playlist-play").addEventListener("click", () => {
+      const name = $("shared-playlist-select").value;
+      const list = shared.playlists.find((item) => item.name === name);
+      if (!list?.paths.length) { log("warn", "sync", "所选歌单没有可播放曲目"); return; }
+      state.activePlaylist = name;
+      renderLibrary();
+      state.libraryOrder = list.paths.map((path) => state.tracks.findIndex((track) => track.path === path)).filter((index) => index >= 0);
+      if (state.libraryOrder.length) selectTrack(state.libraryOrder[0], true);
+    });
+    $("shared-playlist-clear").addEventListener("click", () => { state.activePlaylist = ""; renderLibrary(); });
     $("edit-current-tags").addEventListener("click", openTagEditor);
     $("save-tags").addEventListener("click", saveFlacMetadata);
     $("open-sound").addEventListener("click", () => dom.soundDialog.showModal());
@@ -2829,16 +3126,22 @@
       dom.play.textContent = "Ⅱ";
       document.body.classList.add("is-playing");
       log("info", "playback", "开始播放", currentTrack()?.title || "");
+      void persistResume();
     });
     dom.audio.addEventListener("pause", () => {
       dom.play.textContent = "▶";
       document.body.classList.remove("is-playing");
+      void persistResume();
     });
     dom.audio.addEventListener("ended", () => {
       // 若当前曲目已被清空/移出列表（例如刷新后文件被移走），不要在空列表上乱跳
       if (state.currentIndex >= 0) navigate(1);
     });
     dom.audio.addEventListener("loadedmetadata", () => {
+      if (state.pendingResumeSeconds !== null) {
+        dom.audio.currentTime = Math.min(Math.max(0, state.pendingResumeSeconds), Math.max(0, dom.audio.duration - 0.25));
+        state.pendingResumeSeconds = null;
+      }
       const track = currentTrack();
       if (track) {
         track.duration = dom.audio.duration;
@@ -2848,6 +3151,11 @@
     });
     dom.audio.addEventListener("timeupdate", () => {
       if (!dom.audio.duration) return;
+      const bucket = Math.floor(dom.audio.currentTime / 10);
+      if (bucket !== state.lastResumeBucket) {
+        state.lastResumeBucket = bucket;
+        void persistResume();
+      }
       dom.currentTime.textContent = formatDuration(dom.audio.currentTime);
       dom.totalTime.textContent = formatDuration(dom.audio.duration);
       dom.seek.value = String(Math.round(dom.audio.currentTime / dom.audio.duration * 1000));
@@ -2909,6 +3217,7 @@
     new ResizeObserver(resizeCanvas).observe(dom.canvas);
     dom.volume.style.setProperty("--fill", `${Number(dom.volume.value) * 100}%`);
     dom.seek.style.setProperty("--fill", "0%");
+    setInterval(() => { void refreshSharedState(); }, 2500);
   }
 
   async function boot() {

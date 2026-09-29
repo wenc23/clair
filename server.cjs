@@ -4,7 +4,7 @@ const path = require("path");
 
 const root = path.resolve(__dirname);
 const port = Number(process.env.CLAIR_PORT) || 8000;
-const publicFiles = new Set(["index.html", "styles.css", "app.js", "flac-metadata.js", "library-model.js", "theme-model.js"]);
+const publicFiles = new Set(["index.html", "styles.css", "app.js", "flac-metadata.js", "library-model.js", "theme-model.js", "shared-state-web.js"]);
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",

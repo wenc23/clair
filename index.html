@@ -174,6 +174,7 @@
                 </div>
                 <div class="track-actions">
                   <button class="ghost-button" id="favorite-current">♡ 收藏</button>
+                  <button class="ghost-button is-hidden" id="shared-resume">继续上次播放</button>
                   <button class="ghost-button" id="edit-current-tags" disabled>编辑 FLAC 元数据</button>
                   <button class="ghost-button" data-view-jump="library">查看音乐库</button>
                 </div>
@@ -262,6 +263,17 @@
               </div>
               <button class="danger-button" id="trash-selected">移至回收站 (0)</button>
               <button class="primary-button is-hidden" id="restore-selected">恢复已选择 (0)</button>
+            </div>
+
+            <div class="shared-playlist-bar" aria-label="Web 与桌面版共享歌单">
+              <label>共享歌单 <select id="shared-playlist-select" aria-label="选择共享歌单"></select></label>
+              <input id="shared-playlist-name" maxlength="64" placeholder="新歌单名称" aria-label="新歌单名称" />
+              <button class="secondary-button" id="shared-playlist-create">新建</button>
+              <button class="secondary-button" id="shared-playlist-add">加入当前曲目</button>
+              <button class="secondary-button" id="shared-playlist-remove">移出当前曲目</button>
+              <button class="secondary-button" id="shared-playlist-play">播放歌单</button>
+              <button class="text-button" id="shared-playlist-clear">显示全部</button>
+              <small id="shared-sync-status">连接音乐目录后与桌面版同步</small>
             </div>
 
             <div class="health-panel is-hidden" id="health-panel">
@@ -381,6 +393,7 @@
   <script src="library-model.js"></script>
   <script src="flac-metadata.js"></script>
   <script src="theme-model.js"></script>
+  <script src="shared-state-web.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

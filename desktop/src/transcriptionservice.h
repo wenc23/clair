@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QAudioBuffer>
 #include <QAudioDecoder>
 #include <QFile>
 #include <QProcess>
@@ -51,6 +52,8 @@ private:
     void fail(const QString &message);
     void decoderBufferReady();
     void decoderFinished();
+    bool appendDecodedBuffer(const QAudioBuffer &buffer);
+    bool appendPcmSample(double value, QByteArray &output);
     void startRecognition();
     void processFinished(int exitCode, QProcess::ExitStatus exitStatus);
     QString cacheKey(const QString &audioPath) const;
@@ -64,6 +67,10 @@ private:
     QAudioDecoder m_decoder;
     QFile m_waveFile;
     quint64 m_pcmBytes = 0;
+    int m_inputSampleRate = 0;
+    int m_lastDecodePercent = -1;
+    double m_resamplePhase = 0.0;
+    double m_resampleSum = 0.0;
     QProcess m_process;
     std::unique_ptr<QTemporaryDir> m_workspace;
     QByteArray m_errorTail;

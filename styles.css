@@ -1230,6 +1230,7 @@ select:focus-visible,
 .art-panel,
 .track-panel,
 .library-toolbar,
+.shared-playlist-bar,
 .log-toolbar,
 .health-panel {
   border: var(--edge-w) solid var(--hairline);
@@ -2254,6 +2255,19 @@ body.is-playing .vinyl { animation-play-state: running; }
   padding: 16px;
   border-radius: var(--shape-sheet);
 }
+
+.shared-playlist-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: var(--shape-sheet);
+}
+.shared-playlist-bar label { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 12px; }
+.shared-playlist-bar input,
+.shared-playlist-bar select { min-width: 125px; max-width: 180px; padding: 8px; color: var(--text); background: var(--surface); border: 1px solid var(--hairline); border-radius: 6px; }
+.shared-playlist-bar small { width: 100%; color: var(--faint); }
 
 .library-toolbar label,
 .log-toolbar label {

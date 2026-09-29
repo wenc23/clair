@@ -8,24 +8,24 @@ import QtMultimedia
 ApplicationWindow {
     id: window
     visible: true
-    width: 1120
-    height: 760
-    minimumWidth: 720
-    minimumHeight: 520
+    width: 1320
+    height: 840
+    minimumWidth: 1100
+    minimumHeight: 720
     title: "Clair Desktop"
-    color: "#11141b"
+    color: "#170f1b"
     background: Rectangle {
-        color: "#11141b"
+        color: "#170f1b"
         Image {
             anchors.fill: parent
             source: themeManager.backgroundUrl
             fillMode: Image.PreserveAspectCrop
             cache: false
-            opacity: 0.28
+            opacity: 0.18
         }
     }
     Material.theme: Material.Dark
-    Material.accent: "#d9a980"
+    Material.accent: "#efa7bc"
 
     property int selectedIndex: -1
     property string playbackMode: "列表循环"
@@ -34,6 +34,9 @@ ApplicationWindow {
     property var groupNames: ["全部曲目"]
     property var visibleTracks: []
     property bool lyricsPage: false
+    property string currentPage: "now"
+    property int pendingResumePosition: -1
+    property int lastSavedResumeBucket: -1
     property string transcriptionTarget: ""
 
     ThemeEditor { id: themeEditor }
@@ -43,14 +46,64 @@ ApplicationWindow {
         return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0")
     }
 
-    function playIndex(index) {
+    function playIndex(index, resumePosition) {
         if (index < 0 || index >= library.count)
             return
         fingerprint.cancel()
-        selectedIndex = index
+        // Save the old source under its old key before MediaPlayer emits stop/
+        // position signals for the source transition.
+        if (selectedIndex >= 0 && player.position > 0)
+            sharedState.saveResume(library.syncKeyAt(selectedIndex), player.position)
+        selectedIndex = -1
+        player.stop()
+        player.source = ""
+        pendingResumePosition = resumePosition === undefined ? -1 : resumePosition
+        lastSavedResumeBucket = -1
         player.source = library.sourceAt(index)
+        selectedIndex = index
         lyrics.loadForTrack(player.source)
+        sharedState.selectResume(library.syncKeyAt(index))
         player.play()
+    }
+
+    function prepareSourceChange() {
+        // A root switch immediately redirects SharedState to the new folder.
+        // Stop while the old root/key are still active, never afterwards.
+        if (selectedIndex >= 0 && player.position > 0)
+            sharedState.saveResume(library.syncKeyAt(selectedIndex), player.position)
+        selectedIndex = -1
+        player.stop()
+        player.source = ""
+    }
+
+    function continueSharedPlayback() {
+        const key = sharedState.resume.lastPath || ""
+        for (let i = 0; i < library.count; i++) {
+            if (library.syncKeyAt(i) === key) {
+                playIndex(i, (sharedState.resume.bookmarks || {})[key] || 0)
+                return
+            }
+        }
+    }
+
+    function resumeLabel() {
+        sharedState.revision
+        const key = sharedState.resume.lastPath || ""
+        if (!key || Number((sharedState.resume.bookmarks || {})[key] || 0) <= 0) return ""
+        for (let i = 0; i < library.count; i++)
+            if (library.syncKeyAt(i) === key) return library.titleAt(i)
+        return ""
+    }
+
+    function isFavorite(index) {
+        sharedState.revision
+        return index >= 0 && sharedState.favorite(library.syncKeyAt(index))
+    }
+
+    function activeResumeKey() {
+        if (selectedIndex < 0 || player.source.toString() === "" ||
+            player.source.toString() !== library.sourceAt(selectedIndex).toString()) return ""
+        return library.syncKeyAt(selectedIndex)
     }
 
     function openTrackFolder(index) {
@@ -64,7 +117,9 @@ ApplicationWindow {
 
     function rebuildGroups() {
         let names = []
-        for (let i = 0; i < library.count; i++) {
+        if (groupKind === "歌单") names = sharedState.playlistNames
+        else if (groupKind === "收藏") names = ["收藏曲目"]
+        else for (let i = 0; i < library.count; i++) {
             const name = library.groupAt(i, groupKind)
             if (names.indexOf(name) < 0) names.push(name)
         }
@@ -77,7 +132,11 @@ ApplicationWindow {
     function rebuildVisibleTracks() {
         let rows = []
         for (let i = 0; i < library.count; i++) {
-            if (selectedGroup !== "全部曲目" && library.groupAt(i, groupKind) !== selectedGroup)
+            if (groupKind === "收藏" && !isFavorite(i)) continue
+            if (groupKind === "歌单" && selectedGroup !== "全部曲目" &&
+                sharedState.playlistTracks(selectedGroup).indexOf(library.syncKeyAt(i)) < 0) continue
+            if (selectedGroup !== "全部曲目" && groupKind !== "收藏" && groupKind !== "歌单" &&
+                library.groupAt(i, groupKind) !== selectedGroup)
                 continue
             rows.push({ trackIndex: i, title: library.titleAt(i),
                         artist: library.artistAt(i), album: library.albumAt(i) })
@@ -111,7 +170,7 @@ ApplicationWindow {
     FolderDialog {
         id: folderDialog
         title: "选择音乐目录"
-        onAccepted: library.openFolder(selectedFolder)
+        onAccepted: { window.prepareSourceChange(); library.openFolder(selectedFolder) }
     }
 
     FileDialog {
@@ -273,7 +332,7 @@ ApplicationWindow {
             RowLayout {
                 Layout.fillWidth: true
                 Label { Layout.fillWidth: true; text: library.rootDirectory || "未选择文件夹"; elide: Text.ElideMiddle }
-                Button { text: "移除文件夹"; enabled: library.rootDirectory !== "" && !library.loading; onClicked: library.clearFolder() }
+                Button { text: "移除文件夹"; enabled: library.rootDirectory !== "" && !library.loading; onClicked: { window.prepareSourceChange(); library.clearFolder() } }
             }
             Label { text: "单独导入的文件：" }
             ScrollView {
@@ -320,9 +379,11 @@ ApplicationWindow {
                     text: "重命名文件"
                     enabled: filenameField.text.trim() !== ""
                     onClicked: {
+                        const oldKey = library.syncKeyAt(selectedIndex)
                         player.stop()
                         player.source = ""
                         if (library.renameTrackFile(selectedIndex, filenameField.text)) {
+                            sharedState.migrateKey(oldKey, library.syncKeyAt(selectedIndex))
                             lyrics.loadForTrack(library.sourceAt(selectedIndex))
                             rebuildGroups()
                             filenameField.text = ""
@@ -356,20 +417,54 @@ ApplicationWindow {
         id: player
         audioOutput: AudioOutput { id: audioOutput; volume: desktopSettings.volume }
         onMediaStatusChanged: {
+            if (pendingResumePosition >= 0 && (mediaStatus === MediaPlayer.LoadedMedia || mediaStatus === MediaPlayer.BufferedMedia)) {
+                player.position = pendingResumePosition
+                pendingResumePosition = -1
+            }
             if (mediaStatus === MediaPlayer.EndOfMedia)
                 window.advance(true, false)
+        }
+        onPositionChanged: {
+            const bucket = Math.floor(position / 10000)
+            const key = window.activeResumeKey()
+            if (key !== "" && position > 0 && bucket !== lastSavedResumeBucket) {
+                sharedState.saveResume(key, position)
+                lastSavedResumeBucket = bucket
+            }
+        }
+        onPlaybackStateChanged: {
+            const key = window.activeResumeKey()
+            if (key !== "" && playbackState !== MediaPlayer.PlayingState)
+                sharedState.saveResume(key, position)
         }
     }
 
     Connections {
         target: library
         function onScanStarted() {
-            player.stop()
-            fingerprint.cancel()
+            if (window.selectedIndex >= 0 && player.position > 0)
+                sharedState.saveResume(library.syncKeyAt(window.selectedIndex), player.position)
             window.selectedIndex = -1
+            player.stop()
+            player.source = ""
+            fingerprint.cancel()
             lyrics.loadForTrack("")
         }
         function onCountChanged() { window.rebuildGroups() }
+    }
+    Connections {
+        target: sharedState
+        function onChanged() { if (window.groupKind === "收藏" || window.groupKind === "歌单") window.rebuildGroups() }
+    }
+
+    Dialog {
+        id: newPlaylistDialog
+        title: "新建共享歌单"
+        modal: true
+        anchors.centerIn: parent
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        onAccepted: sharedState.createPlaylist(playlistName.text)
+        TextField { id: playlistName; width: 260; placeholderText: "歌单名称（两版共用）" }
     }
     Connections {
         target: fingerprint
@@ -387,6 +482,7 @@ ApplicationWindow {
                 window.transcriptionTarget === library.sourceAt(window.selectedIndex).toString()) {
                 lyrics.importLrc(lrcFile)
                 window.lyricsPage = true
+                window.currentPage = "lyrics"
             }
         }
     }
@@ -468,10 +564,83 @@ ApplicationWindow {
         }
     }
 
-    ColumnLayout {
+    RowLayout {
         anchors.fill: parent
-        anchors.margins: 24
-        spacing: 16
+        spacing: 0
+
+        Rectangle {
+            Layout.preferredWidth: 206
+            Layout.fillHeight: true
+            color: "#1a1120"
+            border.color: "#382737"
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: 10
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Rectangle {
+                        width: 39; height: 39; radius: 20
+                        gradient: Gradient {
+                            GradientStop { position: 0; color: "#f5a8c2" }
+                            GradientStop { position: 1; color: "#a18cdb" }
+                        }
+                        Label { anchors.centerIn: parent; text: "C"; color: "#241324"; font.family: "Georgia"; font.pixelSize: 24 }
+                    }
+                    ColumnLayout {
+                        spacing: 0
+                        Label { text: "Clair"; color: "#fff0f2"; font.family: "Georgia"; font.pixelSize: 24; font.bold: true }
+                        Label { text: "MUSIC, YOUR WAY"; color: "#b890a6"; font.pixelSize: 8; font.letterSpacing: 1 }
+                    }
+                }
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#483144" }
+                Button {
+                    Layout.fillWidth: true
+                    text: "♫  正在聆听"
+                    highlighted: currentPage === "now"
+                    onClicked: currentPage = "now"
+                }
+                Button {
+                    Layout.fillWidth: true
+                    text: "☷  音乐库"
+                    highlighted: currentPage === "library"
+                    onClicked: { lyricsPage = false; currentPage = "library" }
+                }
+                Button {
+                    Layout.fillWidth: true
+                    text: "♪  歌词"
+                    highlighted: currentPage === "lyrics"
+                    onClicked: { lyricsPage = true; currentPage = "lyrics" }
+                }
+                Item { Layout.fillHeight: true }
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 130
+                    color: "#261a2b"
+                    radius: 8
+                    border.color: "#493443"
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        Label { text: "LOCAL LIBRARY"; color: "#e7a2ba"; font.bold: true; font.pixelSize: 10; font.letterSpacing: 1 }
+                        Label { Layout.fillWidth: true; text: library.count + " 首已记录曲目"; color: "#f4e7ec" }
+                        Label { Layout.fillWidth: true; text: library.sourceSummary; color: "#bfa8b8"; elide: Text.ElideMiddle; font.pixelSize: 11 }
+                        Button { text: "选择音乐文件夹"; onClicked: folderDialog.open() }
+                    }
+                }
+                Button { Layout.fillWidth: true; text: "管理来源"; onClicked: sourceDialog.open() }
+                Button { Layout.fillWidth: true; text: "主题设计"; onClicked: themeEditor.open() }
+                Button { Layout.fillWidth: true; text: "打开 Web 版"; onClicked: desktopSettings.openWebVersion() }
+                Button { Layout.fillWidth: true; text: "Web 设置"; onClicked: webSettingsDialog.open() }
+            }
+        }
+
+        ColumnLayout {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        Layout.margins: 18
+        spacing: 12
 
         RowLayout {
             Layout.fillWidth: true
@@ -479,8 +648,8 @@ ApplicationWindow {
 
             ColumnLayout {
                 spacing: 2
-                Label { text: "CLAIR"; font.pixelSize: 29; font.bold: true; color: "#f6e8d9" }
-                Label { text: "原生音乐播放器 · 任意流派"; color: "#aab0b9" }
+                Label { text: currentPage === "now" ? "正在聆听" : (currentPage === "lyrics" ? "歌词" : "音乐库"); font.family: "Georgia"; font.pixelSize: 26; font.bold: true; color: "#fff0f2" }
+                Label { text: "NATIVE DESKTOP  /  任意流派"; color: "#c18fa8"; font.pixelSize: 10; font.letterSpacing: 1 }
             }
             Item { Layout.fillWidth: true }
             Button {
@@ -489,18 +658,45 @@ ApplicationWindow {
                 onClicked: folderDialog.open()
             }
             Button { text: "导入文件"; enabled: !library.loading; onClicked: audioDialog.open() }
-            Button { text: "管理来源"; onClicked: sourceDialog.open() }
-            Button { text: "主题设计"; onClicked: themeEditor.open() }
             Button {
                 text: "打开 Web 版"
                 onClicked: desktopSettings.openWebVersion()
                 ToolTip.visible: hovered
                 ToolTip.text: "打开试用包自带的 Web 页面；桌面播放不依赖它"
             }
-            Button { text: "Web 设置"; onClicked: webSettingsDialog.open() }
+        }
+
+        NowPlaying {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumWidth: 0
+            Layout.minimumHeight: 0
+            visible: currentPage === "now"
+            hasTrack: window.selectedIndex >= 0
+            playing: player.playbackState === MediaPlayer.PlayingState
+            favorite: window.isFavorite(window.selectedIndex)
+            resumeLabel: window.resumeLabel()
+            trackTitle: hasTrack ? library.titleAt(window.selectedIndex) : ""
+            trackArtist: hasTrack ? library.artistAt(window.selectedIndex) : ""
+            trackAlbum: hasTrack ? library.albumAt(window.selectedIndex) : ""
+            trackSource: hasTrack ? library.sourceAt(window.selectedIndex).toString() : ""
+            lyricLine: lyrics.lineAtPosition(player.position) || (lyrics.plainText ? lyrics.plainText.split("\n")[0] : "")
+            coverSource: themeManager.coverUrl
+            sourceSummary: library.sourceSummary
+            trackCount: library.count
+            durationText: formatTime(player.duration)
+            onShowLibrary: { lyricsPage = false; currentPage = "library" }
+            onShowLyrics: { lyricsPage = true; currentPage = "lyrics" }
+            onEditTrack: editDialog.open()
+            onOpenFolder: window.openTrackFolder(window.selectedIndex)
+            onChooseFolder: folderDialog.open()
+            onShowThemeEditor: themeEditor.open()
+            onToggleFavorite: sharedState.setFavorite(library.syncKeyAt(window.selectedIndex), !favorite)
+            onResumeTrack: window.continueSharedPlayback()
         }
 
         Rectangle {
+            visible: currentPage === "library"
             Layout.fillWidth: true
             Layout.preferredHeight: 66
             radius: 10
@@ -533,18 +729,39 @@ ApplicationWindow {
             visible: text !== ""
             color: "#f3a29d"
             wrapMode: Text.Wrap
-            text: library.errorString || desktopSettings.errorString || player.errorString
+            text: library.errorString || sharedState.errorString || desktopSettings.errorString || player.errorString
         }
 
         RowLayout {
+            visible: currentPage === "library"
             Layout.fillWidth: true
-            Button { text: "曲库"; highlighted: !lyricsPage; onClicked: lyricsPage = false }
-            Button { text: "歌词"; highlighted: lyricsPage; onClicked: lyricsPage = true }
+            Label { text: "共享歌单"; color: "#e7a2ba" }
+            ComboBox { id: playlistSelector; Layout.preferredWidth: 180; model: sharedState.playlistNames }
+            Button { text: "新建"; onClicked: { playlistName.text = ""; newPlaylistDialog.open() } }
+            Button {
+                text: "加入当前曲目"
+                enabled: selectedIndex >= 0 && playlistSelector.currentText !== ""
+                onClicked: sharedState.addToPlaylist(playlistSelector.currentText, library.syncKeyAt(selectedIndex))
+            }
+            Button {
+                text: "从歌单移除"
+                enabled: selectedIndex >= 0 && playlistSelector.currentText !== ""
+                onClicked: sharedState.removeFromPlaylist(playlistSelector.currentText, library.syncKeyAt(selectedIndex))
+            }
+            Item { Layout.fillWidth: true }
+        }
+
+        RowLayout {
+            visible: currentPage !== "now"
+            Layout.fillWidth: true
+            Button { text: "曲库"; highlighted: !lyricsPage; onClicked: { lyricsPage = false; currentPage = "library" } }
+            Button { text: "歌词"; highlighted: lyricsPage; onClicked: { lyricsPage = true; currentPage = "lyrics" } }
             Item { Layout.fillWidth: true }
             Button { text: "编辑曲目"; enabled: selectedIndex >= 0; onClicked: editDialog.open() }
         }
 
         Rectangle {
+            visible: currentPage !== "now"
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: 12
@@ -570,7 +787,7 @@ ApplicationWindow {
                 visible: !lyricsPage
                 Label { text: "分组" }
                 ComboBox {
-                    model: ["全部", "文件夹", "艺术家", "专辑"]
+                    model: ["全部", "收藏", "歌单", "文件夹", "艺术家", "专辑"]
                     onActivated: {
                         window.groupKind = currentText
                         window.selectedGroup = "全部曲目"
@@ -622,6 +839,12 @@ ApplicationWindow {
                             spacing: 2
                             Label { Layout.fillWidth: true; text: modelData.title; elide: Text.ElideRight; font.bold: true }
                             Label { Layout.fillWidth: true; text: modelData.artist + "  ·  " + modelData.album; color: "#aab0b9"; elide: Text.ElideRight }
+                        }
+                        Button {
+                            text: window.isFavorite(modelData.trackIndex) ? "♥" : "♡"
+                            onClicked: sharedState.setFavorite(library.syncKeyAt(modelData.trackIndex), !window.isFavorite(modelData.trackIndex))
+                            ToolTip.visible: hovered
+                            ToolTip.text: "两版同步收藏"
                         }
                         Button {
                             text: "打开文件夹"
@@ -710,10 +933,10 @@ ApplicationWindow {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 146
+            Layout.preferredHeight: 132
             radius: 12
-            color: "#202631"
-            border.color: "#303946"
+            color: "#261a2b"
+            border.color: "#50394a"
 
             Image {
                 anchors.top: parent.top
@@ -767,6 +990,7 @@ ApplicationWindow {
                     Slider { Layout.preferredWidth: 130; from: 0; to: 1; value: desktopSettings.volume; onMoved: desktopSettings.volume = value }
                 }
             }
+        }
         }
     }
 }

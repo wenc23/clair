@@ -325,6 +325,18 @@ QString LibraryModel::albumAt(int index) const
     return index >= 0 && index < m_tracks.size() ? m_tracks.at(index).album : QString();
 }
 
+QString LibraryModel::syncKeyAt(int index) const
+{
+    if (index < 0 || index >= m_tracks.size()) return {};
+    const auto &track = m_tracks.at(index);
+    if (!m_rootDirectory.isEmpty()) {
+        const QString relative = QDir(m_rootDirectory).relativeFilePath(track.path);
+        if (relative != ".." && !relative.startsWith("../") && !QDir::isAbsolutePath(relative))
+            return QFileInfo(m_rootDirectory).fileName() + '/' + QDir::fromNativeSeparators(relative);
+    }
+    return QUrl::fromLocalFile(track.path).toString();
+}
+
 QString LibraryModel::groupAt(int index, const QString &kind) const
 {
     if (index < 0 || index >= m_tracks.size()) return {};

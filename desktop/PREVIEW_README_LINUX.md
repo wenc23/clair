@@ -1,6 +1,10 @@
-# Clair Desktop Linux x64 试用版 0.3.3
+# Clair Desktop Linux x64 试用版 0.3.6
 
 解压后运行 `bin/clair-desktop`。这是原生 Qt 桌面应用，播放不依赖浏览器、Node.js 或 Web 服务。可导入目录或任意位置单独文件；支持播放模式、分组、歌词页/浮窗、主题图片组与框选裁剪。`bin/web/` 仅供“打开 Web 版”按钮使用。
+
+默认进入原生“正在聆听”页，包含唱片、曲目信息、当前歌词和底部播放栏；左侧可切换曲库与歌词。包内有 Clair 启动图标与 Linux 桌面入口。离线转写改用源格式解码再转为 16 kHz PCM，避免某些后端直接请求 16 kHz 时得到空数据。实时频谱尚未实现。
+
+Web 和桌面版需选择同一音乐根目录，才会通过 `.Clair/favorites.json`、`playlists.json`、`resume.json` 共享收藏、命名歌单及每曲继续播放位置。两版播放互不抢占，状态不会强制实时控制另一播放器。Web 需使用支持文件夹读写 API 的浏览器；外部单文件和 LAN 只读曲库不参与同步。同一瞬间跨进程编辑同一共享文件尚无事务保护，请备份重要歌单。
 
 这个包在 **Ubuntu 24.04 / WSLg x64** 构建并冷启动验证，尚不能保证兼容其他发行版或更旧 glibc。目标系统仍须有 XCB/OpenGL/音频设备等系统库；Ubuntu 24.04 至少可安装 `libgl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1`。若 Wayland 合成器不允许歌词浮窗置顶，可使用普通歌词页。此包不适用于 Windows/macOS。
 

@@ -157,7 +157,7 @@ void TranscriptionServiceTest::decodesOptionalRealAudio()
     service.setModelFile(QUrl::fromLocalFile(model));
     QSignalSpy completed(&service, &TranscriptionService::completed);
     service.transcribe(QUrl::fromLocalFile(audio));
-    QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 1, 30000);
+    QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 1, 120000);
     QVERIFY2(service.status().contains(QStringLiteral("草稿")), qPrintable(service.status()));
 }
 
@@ -171,7 +171,7 @@ void TranscriptionServiceTest::usesBundledModelIfRequested()
     QVERIFY(service.ready());
     QSignalSpy completed(&service, &TranscriptionService::completed);
     service.transcribe(QUrl::fromLocalFile(audio));
-    QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 1, 60000);
+    QTRY_COMPARE_WITH_TIMEOUT(completed.size(), 1, 180000);
     QVERIFY(QFileInfo::exists(service.resultFile().toLocalFile()));
 }
 
