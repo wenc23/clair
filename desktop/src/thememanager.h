@@ -48,10 +48,12 @@ private:
     bool writeManifest(const QString &dir, const QVariantMap &manifest);
     bool renderSlot(const QString &dir, const QString &originalName, const QString &slot,
                     double x, double y, double width, double height);
+    bool createStage(const QString &id, QString &stage);
     void setError(const QString &message);
     bool validId(const QString &id) const;
 
     QString m_root;
+    bool m_autoRoot = false;
     QString m_activeId;
     QString m_error;
     quint64 m_revision = 0;

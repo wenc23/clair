@@ -8,7 +8,6 @@ Item {
     property bool hasTrack: false
     property bool playing: false
     property bool favorite: false
-    property string resumeLabel: ""
     property string trackTitle: ""
     property string trackArtist: ""
     property string trackAlbum: ""
@@ -26,7 +25,6 @@ Item {
     signal chooseFolder()
     signal showThemeEditor()
     signal toggleFavorite()
-    signal resumeTrack()
 
     readonly property color panel: "#201823"
     readonly property color borderTone: "#493243"
@@ -182,22 +180,6 @@ Item {
                         Button { text: page.favorite ? "♥ 已收藏" : "♡ 收藏"; enabled: page.hasTrack; onClicked: page.toggleFavorite() }
                         Button { text: "编辑曲目"; enabled: page.hasTrack; onClicked: page.editTrack() }
                         Button { text: "打开文件夹"; enabled: page.hasTrack; onClicked: page.openFolder() }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        visible: page.resumeLabel !== ""
-                        Button {
-                            text: "接续共享进度"
-                            onClicked: page.resumeTrack()
-                            ToolTip.visible: hovered
-                            ToolTip.text: "仅在点击后从共享断点播放；另一版不会被暂停"
-                        }
-                        Label {
-                            Layout.fillWidth: true
-                            text: page.resumeLabel
-                            color: page.muted
-                            elide: Text.ElideRight
-                        }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: page.borderTone }
                     Item { Layout.fillHeight: true }

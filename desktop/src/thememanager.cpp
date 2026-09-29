@@ -33,14 +33,54 @@ ThemeManager::ThemeManager(const QString &storageRoot, QObject *parent)
     : QObject(parent),
       m_root(storageRoot.isEmpty()
                  ? QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/themes"
-                 : storageRoot)
+                 : storageRoot),
+      m_autoRoot(storageRoot.isEmpty())
 {
+    if (m_autoRoot) {
+        // If a previous import had to fall back to local data, keep using it
+        // on the next launch instead of hiding the user's newly saved theme.
+        const QString localRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+                                  + QStringLiteral("/themes");
+        if (localRoot != m_root) {
+            QFile localCurrent(QDir(localRoot).filePath("current.txt"));
+            if (localCurrent.open(QIODevice::ReadOnly)) {
+                const QString localId = QString::fromUtf8(localCurrent.readAll()).trimmed();
+                const QString previousRoot = m_root;
+                m_root = localRoot;
+                if (!validId(localId) || readManifest(localId).isEmpty()) m_root = previousRoot;
+            }
+        }
+    }
     QDir().mkpath(m_root);
     QFile current(QDir(m_root).filePath("current.txt"));
     if (current.open(QIODevice::ReadOnly)) {
         const QString id = QString::fromUtf8(current.readAll()).trimmed();
         if (validId(id) && !readManifest(id).isEmpty()) m_activeId = id;
     }
+}
+
+bool ThemeManager::createStage(const QString &id, QString &stage)
+{
+    stage = QDir(m_root).filePath(QStringLiteral(".staging-") + id);
+    if (QDir().mkpath(stage)) return true;
+    if (m_autoRoot) {
+        const QString localRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+                                  + QStringLiteral("/themes");
+        if (localRoot != m_root) {
+            const QString localStage = QDir(localRoot).filePath(QStringLiteral(".staging-") + id);
+            if (QDir().mkpath(localStage)) {
+                m_root = localRoot;
+                m_activeId.clear();
+                stage = localStage;
+                emit themeChanged();
+                emit themesChanged();
+                return true;
+            }
+        }
+    }
+    setError(QStringLiteral("无法创建主题目录：") + QDir::toNativeSeparators(m_root)
+             + QStringLiteral("。请检查该位置的写入权限或可用空间。"));
+    return false;
 }
 
 bool ThemeManager::validId(const QString &id) const
@@ -189,8 +229,8 @@ bool ThemeManager::createTheme(const QString &name, const QVariantList &files)
         return false;
     }
     const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QString stage = QDir(m_root).filePath(".staging-" + id);
-    if (!QDir().mkpath(stage)) { setError(QStringLiteral("无法创建主题目录。")); return false; }
+    QString stage;
+    if (!createStage(id, stage)) return false;
     QStringList originalNames;
     for (int i = 0; i < files.size(); ++i) {
         const QUrl url = files.at(i).toUrl();
@@ -288,11 +328,8 @@ bool ThemeManager::importThemePack(const QUrl &manifestFile)
     }
     const QVariantMap inputSlots = input.value("slots").toMap();
     const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    const QString stage = QDir(m_root).filePath(".staging-" + id);
-    if (!QDir().mkpath(stage)) {
-        setError(QStringLiteral("无法创建主题目录。"));
-        return false;
-    }
+    QString stage;
+    if (!createStage(id, stage)) return false;
     QVariantMap outputSlots;
     QStringList copied;
     for (const Slot &slot : kSlots) {

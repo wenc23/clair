@@ -16,7 +16,7 @@ class LyricsService final : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QVariantList candidates READ candidates NOTIFY candidatesChanged)
 public:
-    explicit LyricsService(QObject *parent = nullptr);
+    explicit LyricsService(QObject *parent = nullptr, const QString &timingStorePath = {});
     QVariantList lines() const;
     QString plainText() const { return m_plainText; }
     QString status() const { return m_status; }
@@ -39,6 +39,7 @@ private:
     QString keyForCurrentTrack() const;
     void applyLineTimes();
     bool saveTimingOffset();
+    QString timingStorePath() const;
     void requestSearch(const QString &title, const QString &artist, qint64 durationMs,
                        bool broad, quint64 generation);
     void cancelPendingSearch();
@@ -50,6 +51,7 @@ private:
     QVector<int> m_sourceIndices;
     qint64 m_offsetMs = 0;
     QString m_timingKey;
+    QString m_timingStorePath;
     QString m_plainText;
     QString m_trackPath;
     QString m_status;

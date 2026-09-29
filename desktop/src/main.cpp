@@ -25,6 +25,7 @@ int main(int argc, char *argv[])
     const bool diagnostic = arguments.contains("--smoke") ||
         arguments.contains("--screenshot") || arguments.contains("--screenshot-theme") ||
         arguments.contains("--screenshot-lyrics") || arguments.contains("--screenshot-lyrics-controls") ||
+        arguments.contains("--screenshot-lyrics-locked") ||
         arguments.contains("--idle-smoke");
     std::unique_ptr<QTemporaryDir> diagnosticSettings;
     if (diagnostic) {
@@ -134,11 +135,15 @@ int main(int argc, char *argv[])
             app.exit(overlay && overlay->grabWindow().save(path) ? 0 : 2);
         });
     }
-    const int controlsScreenshotArg = arguments.indexOf("--screenshot-lyrics-controls");
+    const bool lockedScreenshot = arguments.contains("--screenshot-lyrics-locked");
+    const int controlsScreenshotArg = lockedScreenshot
+        ? arguments.indexOf("--screenshot-lyrics-locked")
+        : arguments.indexOf("--screenshot-lyrics-controls");
     if (controlsScreenshotArg >= 0 && controlsScreenshotArg + 1 < arguments.size()) {
         const QString path = arguments.at(controlsScreenshotArg + 1);
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
         auto *overlay = window ? window->findChild<QQuickWindow *>("floatingLyrics") : nullptr;
+        if (lockedScreenshot) settings.setLyricsOverlayLocked(true);
         if (overlay) {
             overlay->setProperty("previewControls", true);
             overlay->setVisible(true);

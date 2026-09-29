@@ -25,7 +25,7 @@ An AI crop skill can generate a directory containing `manifest.json` plus the re
 
 `crop` is `[x, y, width, height]` in 0–1 coordinates of the orientation-corrected original. The app assigns a **new UUID** on import, validates slot dimensions and safe basename-only original paths, copies the originals, and regenerates the output PNGs itself; supplied output images are not trusted. An incorrectly shaped crop is center-trimmed to the slot ratio rather than distorted. The importer accepts image files up to 100 MiB and 50 megapixels each; the manifest limit is 1 MiB.
 
-The asset directory is `QStandardPaths::AppDataLocation/themes/<UUID>` and contains `manifest.json`, `original-*` files, and the three output PNGs. Current code supports manifest version 1 only; a newer incompatible manifest will be rejected rather than silently interpreted.
+The asset directory is normally `QStandardPaths::AppDataLocation/themes/<UUID>`; when that location cannot create a new theme, the native app tries `QStandardPaths::AppLocalDataLocation/themes/<UUID>` and keeps using an active theme there after restart. Each theme contains `manifest.json`, `original-*` files, and the three output PNGs. Current code supports manifest version 1 only; a newer incompatible manifest will be rejected rather than silently interpreted.
 
 ## Integration
 

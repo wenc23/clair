@@ -129,7 +129,8 @@ void LyricsServiceTest::shiftsWholeSongWithoutEditingOriginalLrc()
     QCOMPARE(lrc.write(original), original.size());
     lrc.close();
 
-    LyricsService lyrics;
+    const QString timingStore = QDir(temporary.path()).filePath("lyrics-timing.ini");
+    LyricsService lyrics(nullptr, timingStore);
     lyrics.loadForTrack(QUrl::fromLocalFile(audioPath));
     QCOMPARE(lyrics.lines().first().toMap().value("sourceIndex").toInt(), 0);
     QVERIFY(lyrics.adjustLineTime(0, 4000));
@@ -141,6 +142,10 @@ void LyricsServiceTest::shiftsWholeSongWithoutEditingOriginalLrc()
     QCOMPARE(lyrics.lineAtPosition(4500), QStringLiteral("first"));
     lyrics.loadForTrack(QUrl::fromLocalFile(audioPath));
     QCOMPARE(lyrics.lines().last().toMap().value("timeMs").toLongLong(), 6000);
+    LyricsService reopened(nullptr, timingStore);
+    reopened.loadForTrack(QUrl::fromLocalFile(audioPath));
+    QCOMPARE(reopened.lines().first().toMap().value("timeMs").toLongLong(), 4000);
+    QCOMPARE(reopened.lines().last().toMap().value("timeMs").toLongLong(), 6000);
     // Re-anchoring a different sentence still moves the entire timeline.
     QVERIFY(lyrics.adjustLineTime(1, 1000));
     QCOMPARE(lyrics.lines().first().toMap().value("timeMs").toLongLong(), -1000);
@@ -148,6 +153,8 @@ void LyricsServiceTest::shiftsWholeSongWithoutEditingOriginalLrc()
     QVERIFY(lyrics.resetTimingOffset());
     QCOMPARE(lyrics.lines().first().toMap().value("timeMs").toLongLong(), 1000);
     QCOMPARE(lyrics.lines().last().toMap().value("timeMs").toLongLong(), 3000);
+    reopened.loadForTrack(QUrl::fromLocalFile(audioPath));
+    QCOMPARE(reopened.lines().first().toMap().value("timeMs").toLongLong(), 1000);
     QVERIFY(!lyrics.adjustLineTime(10, 1000));
     QVERIFY(!lyrics.adjustLineTime(0, -1));
     QVERIFY(lrc.open(QIODevice::ReadOnly));
@@ -158,6 +165,7 @@ void LyricsServiceTest::shiftsWholeSongWithoutEditingOriginalLrc()
         + QLatin1Char('/') + QString::fromLatin1(
             QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex());
     // A single correction written by 0.3.7 becomes a whole-song offset.
+    QSettings(timingStore, QSettings::IniFormat).remove(timingKey);
     QSettings(QSettings::UserScope, "Clair", "ClairDesktop")
         .setValue(timingKey, QVariantMap{{"0", 4000}});
     lyrics.loadForTrack(QUrl::fromLocalFile(audioPath));

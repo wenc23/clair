@@ -38,6 +38,11 @@ ApplicationWindow {
     property int pendingResumePosition: -1
     property int lastSavedResumeBucket: -1
     property string transcriptionTarget: ""
+    property bool startupResumePending: true
+    property string panelError: library.errorString || desktopSettings.errorString || player.errorString
+    onPanelErrorChanged: {
+        if (panelError !== "") errorToastTimer.restart()
+    }
 
     ThemeEditor { id: themeEditor }
 
@@ -115,14 +120,13 @@ ApplicationWindow {
         }
     }
 
-    function resumeLabel() {
-        sharedState.revision
-        const key = sharedState.resume.lastPath || ""
-        if (!key || Number((sharedState.resume.bookmarks || {})[key] || 0) <= 0) return ""
-        for (let i = 0; i < library.count; i++)
-            if (library.syncKeyAt(i) === key) return library.titleAt(i)
-        return ""
+    function resumeOnStartup() {
+        if (!startupResumePending || library.loading) return
+        startupResumePending = false
+        if (library.count > 0) continueSharedPlayback()
     }
+
+    Component.onCompleted: Qt.callLater(resumeOnStartup)
 
     function isFavorite(index) {
         sharedState.revision
@@ -553,6 +557,7 @@ ApplicationWindow {
             lyrics.loadForTrack("")
         }
         function onCountChanged() { window.rebuildGroups() }
+        function onLoadingChanged() { if (!library.loading) window.resumeOnStartup() }
     }
     Connections {
         target: sharedState
@@ -602,8 +607,7 @@ ApplicationWindow {
         color: "transparent"
         Material.theme: Material.Dark
         Material.accent: "#d9a980"
-        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
-               (desktopSettings.lyricsOverlayLocked ? Qt.WindowTransparentForInput : 0)
+        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
         Rectangle {
             anchors.fill: parent
             radius: 14
@@ -626,23 +630,14 @@ ApplicationWindow {
                 style: Text.Outline
                 styleColor: "#b0000000"
                 text: lyrics.lineAtPosition(player.position) ||
-                      (lyrics.plainText ? lyrics.plainText.split("\n")[0] : "暂无歌词 · 可在主窗口导入或搜索")
+                      (lyrics.plainText ? lyrics.plainText.split("\n")[0] : "♫")
                 MouseArea {
                     anchors.fill: parent
                     enabled: !desktopSettings.lyricsOverlayLocked
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    acceptedButtons: Qt.LeftButton
                     hoverEnabled: true
                     cursorShape: Qt.SizeAllCursor
-                    onPressed: (mouse) => {
-                        if (mouse.button === Qt.RightButton) {
-                            const line = lyrics.lineIndexAtPosition(player.position)
-                            if (line >= 0) window.openLyricTiming(lyrics.lines[line])
-                        } else {
-                            floatingLyrics.startSystemMove()
-                        }
-                    }
-                    ToolTip.visible: containsMouse
-                    ToolTip.text: "左键拖动浮窗；右键调整当前歌词时间"
+                    onPressed: floatingLyrics.startSystemMove()
                 }
             }
             RowLayout {
@@ -651,7 +646,7 @@ ApplicationWindow {
                 anchors.bottom: parent.bottom
                 anchors.margins: 8
                 height: 42
-                visible: !desktopSettings.lyricsOverlayLocked && (overlayHover.hovered || floatingLyrics.previewControls)
+                visible: overlayHover.hovered || floatingLyrics.previewControls
                 spacing: 6
                 ToolButton { text: "上一首"; Material.foreground: "#fff4e8"; enabled: selectedIndex >= 0; onClicked: advance(false, true) }
                 ToolButton {
@@ -668,7 +663,11 @@ ApplicationWindow {
                 Label { text: "底色"; font.pixelSize: 12; color: "#fff4e8" }
                 Slider { Layout.preferredWidth: 84; from: 0; to: 0.9; value: desktopSettings.lyricsOverlayOpacity; onMoved: desktopSettings.lyricsOverlayOpacity = value }
                 Item { Layout.fillWidth: true }
-                ToolButton { text: "锁定"; Material.foreground: "#fff4e8"; onClicked: desktopSettings.lyricsOverlayLocked = true; ToolTip.text: "锁定后鼠标点击会穿透浮窗；在主窗口解锁"; ToolTip.visible: hovered }
+                ToolButton {
+                    text: desktopSettings.lyricsOverlayLocked ? "解锁" : "锁定"
+                    Material.foreground: "#fff4e8"
+                    onClicked: desktopSettings.lyricsOverlayLocked = !desktopSettings.lyricsOverlayLocked
+                }
                 ToolButton { text: "关闭"; Material.foreground: "#fff4e8"; onClicked: floatingLyrics.visible = false }
             }
         }
@@ -785,7 +784,6 @@ ApplicationWindow {
             hasTrack: window.selectedIndex >= 0
             playing: player.playbackState === MediaPlayer.PlayingState
             favorite: window.isFavorite(window.selectedIndex)
-            resumeLabel: window.resumeLabel()
             trackTitle: hasTrack ? library.titleAt(window.selectedIndex) : ""
             trackArtist: hasTrack ? library.artistAt(window.selectedIndex) : ""
             trackAlbum: hasTrack ? library.albumAt(window.selectedIndex) : ""
@@ -802,7 +800,6 @@ ApplicationWindow {
             onChooseFolder: folderDialog.open()
             onShowThemeEditor: themeEditor.open()
             onToggleFavorite: sharedState.setFavorite(library.syncKeyAt(window.selectedIndex), !favorite)
-            onResumeTrack: window.continueSharedPlayback()
         }
 
         Rectangle {
@@ -832,14 +829,6 @@ ApplicationWindow {
                     ToolTip.text: "在文件管理器删除音乐后，点这里更新曲目列表"
                 }
             }
-        }
-
-        Label {
-            Layout.fillWidth: true
-            visible: text !== ""
-            color: "#f3a29d"
-            wrapMode: Text.Wrap
-            text: library.errorString || sharedState.errorString || desktopSettings.errorString || player.errorString
         }
 
         RowLayout {
@@ -995,7 +984,7 @@ ApplicationWindow {
                         text: desktopSettings.lyricsOverlayLocked ? "解锁浮窗" : "锁定浮窗"
                         onClicked: desktopSettings.lyricsOverlayLocked = !desktopSettings.lyricsOverlayLocked
                         ToolTip.visible: hovered
-                        ToolTip.text: "锁定后浮窗可点击穿透；从这里解锁"
+                        ToolTip.text: "锁定后不能拖动浮窗；可在浮窗或这里解锁"
                     }
                     Button {
                         visible: floatingLyrics.visible
@@ -1112,6 +1101,39 @@ ApplicationWindow {
                 }
             }
         }
+        }
+    }
+
+    Timer { id: errorToastTimer; interval: 6000 }
+    Rectangle {
+        id: errorToast
+        z: 100
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 16
+        width: Math.min(440, window.width - 32)
+        height: Math.max(48, toastMessage.implicitHeight + 16)
+        radius: 9
+        color: "#39242b"
+        border.color: "#b76f7e"
+        visible: errorToastTimer.running && window.panelError !== ""
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 8
+            Label {
+                id: toastMessage
+                Layout.fillWidth: true
+                text: window.panelError
+                color: "#ffe2e2"
+                wrapMode: Text.Wrap
+                maximumLineCount: 2
+                elide: Text.ElideRight
+                font.pixelSize: 12
+            }
+            ToolButton {
+                text: "×"
+                onClicked: errorToastTimer.stop()
+            }
         }
     }
 }

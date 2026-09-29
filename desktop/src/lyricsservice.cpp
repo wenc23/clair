@@ -72,7 +72,15 @@ int candidateScore(const QJsonObject &item, const SearchIdentity &identity, qint
 }
 }
 
-LyricsService::LyricsService(QObject *parent) : QObject(parent) {}
+LyricsService::LyricsService(QObject *parent, const QString &timingStorePath)
+    : QObject(parent), m_timingStorePath(timingStorePath) {}
+
+QString LyricsService::timingStorePath() const
+{
+    if (!m_timingStorePath.isEmpty()) return m_timingStorePath;
+    return QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation))
+        .filePath(QStringLiteral("lyrics-timing.ini"));
+}
 
 QVariantList LyricsService::lines() const
 {
@@ -99,8 +107,12 @@ void LyricsService::loadText(const QByteArray &bytes, const QString &origin)
                   + QLatin1Char('/') + QString::fromLatin1(
                       QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
     m_offsetMs = 0;
-    const QVariant saved = QSettings(QSettings::UserScope, "Clair", "ClairDesktop")
-                               .value(m_timingKey);
+    // New corrections live in one local settings file. Continue reading older
+    // registry corrections when that file does not contain this song/version.
+    QSettings local(timingStorePath(), QSettings::IniFormat);
+    const QVariant saved = local.contains(m_timingKey)
+        ? local.value(m_timingKey)
+        : QSettings(QSettings::UserScope, "Clair", "ClairDesktop").value(m_timingKey);
     bool offsetValid = false;
     qint64 offset = saved.toLongLong(&offsetValid);
     // 0.3.7 stored per-line overrides. A single correction can be migrated
@@ -150,11 +162,18 @@ void LyricsService::applyLineTimes()
 bool LyricsService::saveTimingOffset()
 {
     if (m_timingKey.isEmpty()) return false;
-    QSettings settings(QSettings::UserScope, "Clair", "ClairDesktop");
-    if (m_offsetMs == 0) settings.remove(m_timingKey);
-    else settings.setValue(m_timingKey, m_offsetMs);
+    const QString path = timingStorePath();
+    if (!QDir().mkpath(QFileInfo(path).absolutePath())) return false;
+    QSettings settings(path, QSettings::IniFormat);
+    // Keep an explicit zero so an older registry correction cannot reappear
+    // after the user restores the original timing.
+    settings.setValue(m_timingKey, m_offsetMs);
     settings.sync();
-    return settings.status() == QSettings::NoError;
+    if (settings.status() != QSettings::NoError) return false;
+    QSettings verify(path, QSettings::IniFormat);
+    bool valid = false;
+    const qint64 saved = verify.value(m_timingKey).toLongLong(&valid);
+    return verify.status() == QSettings::NoError && valid && saved == m_offsetMs;
 }
 
 bool LyricsService::adjustLineTime(int sourceIndex, qint64 timeMs)

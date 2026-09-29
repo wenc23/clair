@@ -2,7 +2,7 @@
 
 转写草稿在用户缓存目录中：超过一天且未被选为歌词的哈希命名草稿，只有在缓存超过 100 MB 或 256 项时才会按旧到新整理；已选为歌词的草稿始终保留。临时 WAV 正常结束即删除，崩溃残留只在明确陈旧且无任务持有锁时清理。原音频、手动 LRC、主题图不会被该流程删除。
 
-Windows/Linux 0.3.9 试用包自带 CPU 版 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) `whisper-cli` 和多语种 `ggml-tiny-q5_1.bin`（约 32 MB）。用户在“歌词”页点击“离线转写”→“开始转写”即可；无需自行选择 FFmpeg、程序或模型。识别只在用户主动触发时运行，不上传音频。未打包的开发构建仍可在“高级设置”中自选程序和模型。
+Windows/Linux 0.3.10 试用包自带 CPU 版 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) `whisper-cli` 和多语种 `ggml-tiny-q5_1.bin`（约 32 MB）。用户在“歌词”页点击“离线转写”→“开始转写”即可；无需自行选择 FFmpeg、程序或模型。识别只在用户主动触发时运行，不上传音频。未打包的开发构建仍可在“高级设置”中自选程序和模型。
 
 应用使用已有 Qt Multimedia/FFmpeg 媒体后端的 `QAudioDecoder` 在本机把音频转换成 16 kHz、单声道、16-bit PCM WAV，再异步调用 `whisper-cli` 生成行级 LRC。这样不额外分发一份 FFmpeg 命令行程序。成功结果缓存于用户缓存目录；输入音频、模型或识别程序变化后缓存失效。任务可取消，退出时终止子进程。不会修改原音频、同目录 LRC 或 Web 版曲库。
 

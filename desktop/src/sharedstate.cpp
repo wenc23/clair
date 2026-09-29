@@ -7,6 +7,8 @@
 #include <QJsonDocument>
 #include <QSaveFile>
 #include <QDateTime>
+#include <QDebug>
+#include <QThread>
 
 namespace {
 constexpr auto kFavorites = "favorites.json";
@@ -63,6 +65,7 @@ void SharedState::setError(const QString &error)
 {
     if (m_error == error) return;
     m_error = error;
+    if (!error.isEmpty()) qWarning().noquote() << "Clair shared state:" << error;
     emit changed();
 }
 
@@ -91,14 +94,27 @@ bool SharedState::writeFile(const QString &name, const QJsonObject &value)
     if (!QDir().mkpath(QDir(m_root).filePath(".Clair"))) {
         setError(QStringLiteral("无法创建共享状态目录。")); return false;
     }
-    QSaveFile file(filePath(name));
     const QByteArray bytes = QJsonDocument(value).toJson(QJsonDocument::Indented);
-    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit()) {
-        setError(QStringLiteral("无法保存共享状态：") + filePath(name)); return false;
+    QString failure;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        // A browser and the desktop player may touch the same file at once on
+        // Windows. Retry a short-lived rename/share violation, but never
+        // overwrite a document that became invalid between attempts.
+        if (attempt > 0 && !readFile(name, old)) {
+            setError(QStringLiteral("共享状态文件损坏，未覆盖原文件：") + filePath(name));
+            return false;
+        }
+        QSaveFile file(filePath(name));
+        if (file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit()) {
+            setError({});
+            refresh();
+            return true;
+        }
+        failure = file.errorString();
+        if (attempt < 2) QThread::msleep(30 * (attempt + 1));
     }
-    setError({});
-    refresh();
-    return true;
+    setError(QStringLiteral("无法保存共享状态：") + filePath(name) + QStringLiteral("（") + failure + QStringLiteral("）"));
+    return false;
 }
 
 void SharedState::setRoot(const QString &path)
