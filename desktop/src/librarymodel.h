@@ -54,8 +54,10 @@ public:
     Q_INVOKABLE void addFiles(const QVariantList &files);
     Q_INVOKABLE void removeImportedFile(const QString &path);
     Q_INVOKABLE void clearFolder();
+    Q_INVOKABLE void refresh();
     void restoreSources(const QUrl &folder, const QStringList &files);
     Q_INVOKABLE QUrl sourceAt(int index) const;
+    Q_INVOKABLE bool openTrackFolder(int index);
     Q_INVOKABLE QString titleAt(int index) const;
     Q_INVOKABLE QString artistAt(int index) const;
     Q_INVOKABLE QString albumAt(int index) const;

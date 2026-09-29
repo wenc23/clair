@@ -64,5 +64,28 @@ int main(int argc, char *argv[])
             app.exit(window && window->grabWindow().save(path) ? 0 : 2);
         });
     }
+    const int lyricsScreenshotArg = arguments.indexOf("--screenshot-lyrics");
+    if (lyricsScreenshotArg >= 0 && lyricsScreenshotArg + 1 < arguments.size()) {
+        const QString path = arguments.at(lyricsScreenshotArg + 1);
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        auto *overlay = window ? window->findChild<QQuickWindow *>("floatingLyrics") : nullptr;
+        if (overlay) overlay->setVisible(true);
+        QTimer::singleShot(800, &app, [overlay, path, &app] {
+            app.exit(overlay && overlay->grabWindow().save(path) ? 0 : 2);
+        });
+    }
+    const int controlsScreenshotArg = arguments.indexOf("--screenshot-lyrics-controls");
+    if (controlsScreenshotArg >= 0 && controlsScreenshotArg + 1 < arguments.size()) {
+        const QString path = arguments.at(controlsScreenshotArg + 1);
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        auto *overlay = window ? window->findChild<QQuickWindow *>("floatingLyrics") : nullptr;
+        if (overlay) {
+            overlay->setProperty("previewControls", true);
+            overlay->setVisible(true);
+        }
+        QTimer::singleShot(800, &app, [overlay, path, &app] {
+            app.exit(overlay && overlay->grabWindow().save(path) ? 0 : 2);
+        });
+    }
     return app.exec();
 }

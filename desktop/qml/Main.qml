@@ -53,6 +53,15 @@ ApplicationWindow {
         player.play()
     }
 
+    function openTrackFolder(index) {
+        // Release the media handle first so Explorer can move or delete the file.
+        if (index === selectedIndex) {
+            player.stop()
+            player.source = ""
+        }
+        library.openTrackFolder(index)
+    }
+
     function rebuildGroups() {
         let names = []
         for (let i = 0; i < library.count; i++) {
@@ -120,11 +129,6 @@ ApplicationWindow {
         onAccepted: lyrics.importLrc(selectedFile)
     }
 
-    FileDialog {
-        id: ffmpegDialog
-        title: "选择 FFmpeg 可执行文件"
-        onAccepted: transcription.ffmpegExecutable = selectedFile
-    }
     FileDialog {
         id: whisperDialog
         title: "选择 whisper.cpp 的 whisper-cli 可执行文件"
@@ -201,7 +205,8 @@ ApplicationWindow {
 
     Dialog {
         id: transcriptionDialog
-        title: "可选离线歌词转写"
+        property bool advancedTools: false
+        title: "本机歌词转写"
         modal: true
         anchors.centerIn: parent
         width: Math.min(window.width - 70, 660)
@@ -210,29 +215,19 @@ ApplicationWindow {
             width: transcriptionDialog.width - 40
             Label {
                 Layout.fillWidth: true
-                text: "用本机 FFmpeg + whisper.cpp 生成待校对 LRC 草稿。不上传音频；首次需自行提供程序和模型。"
+                text: "点击开始即可用内置轻量模型生成 LRC 草稿，不上传音频。歌曲伴奏可能造成错词或漏词，请人工校对。"
                 wrapMode: Text.Wrap
             }
-            RowLayout {
+            Label {
                 Layout.fillWidth: true
-                Label { Layout.fillWidth: true; text: transcription.ffmpegExecutable.toString() || "尚未选 FFmpeg"; elide: Text.ElideMiddle }
-                Button { text: "选 FFmpeg"; onClicked: ffmpegDialog.open() }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Label { Layout.fillWidth: true; text: transcription.whisperExecutable.toString() || "尚未选 whisper-cli"; elide: Text.ElideMiddle }
-                Button { text: "选 whisper-cli"; onClicked: whisperDialog.open() }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Label { Layout.fillWidth: true; text: transcription.modelFile.toString() || "尚未选 ggml 模型"; elide: Text.ElideMiddle }
-                Button { text: "选模型"; onClicked: modelDialog.open() }
+                text: transcription.ready ? "内置离线转写已就绪" : "内置组件缺失：请解压完整试用包"
+                color: transcription.ready ? "#a6d9ae" : "#f3a29d"
             }
             RowLayout {
                 Layout.fillWidth: true
                 Button {
                     text: "开始转写"
-                    enabled: selectedIndex >= 0 && !transcription.busy
+                    enabled: selectedIndex >= 0 && !transcription.busy && transcription.ready
                     onClicked: {
                         window.transcriptionTarget = library.sourceAt(selectedIndex).toString()
                         transcription.transcribe(library.sourceAt(selectedIndex))
@@ -241,6 +236,27 @@ ApplicationWindow {
                 Button { text: "取消任务"; enabled: transcription.busy; onClicked: transcription.cancel() }
             }
             Label { Layout.fillWidth: true; text: transcription.status; wrapMode: Text.Wrap; color: "#aab0b9" }
+            Button {
+                text: transcriptionDialog.advancedTools ? "收起高级设置" : "高级设置（可选）"
+                onClicked: transcriptionDialog.advancedTools = !transcriptionDialog.advancedTools
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: transcriptionDialog.advancedTools
+                Label { Layout.fillWidth: true; text: transcription.whisperExecutable.toString(); elide: Text.ElideMiddle }
+                Button { text: "自选识别程序"; onClicked: whisperDialog.open() }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: transcriptionDialog.advancedTools
+                Label { Layout.fillWidth: true; text: transcription.modelFile.toString(); elide: Text.ElideMiddle }
+                Button { text: "自选模型"; onClicked: modelDialog.open() }
+            }
+            Button {
+                visible: transcriptionDialog.advancedTools
+                text: "恢复内置组件"
+                onClicked: transcription.useBundledTools()
+            }
         }
     }
 
@@ -338,7 +354,7 @@ ApplicationWindow {
 
     MediaPlayer {
         id: player
-        audioOutput: AudioOutput { id: audioOutput; volume: 1.0 }
+        audioOutput: AudioOutput { id: audioOutput; volume: desktopSettings.volume }
         onMediaStatusChanged: {
             if (mediaStatus === MediaPlayer.EndOfMedia)
                 window.advance(true, false)
@@ -377,20 +393,78 @@ ApplicationWindow {
 
     Window {
         id: floatingLyrics
+        objectName: "floatingLyrics"
+        property bool previewControls: false
         title: "Clair · 浮动歌词"
-        width: 550
-        height: 110
+        width: 660
+        height: 126
+        x: window.x + (window.width - width) / 2
+        y: window.y + window.height - height - 150
         visible: false
-        color: "#202631"
-        flags: Qt.Window | Qt.WindowStaysOnTopHint
-        Label {
+        color: "transparent"
+        Material.theme: Material.Dark
+        Material.accent: "#d9a980"
+        flags: Qt.Tool | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint |
+               (desktopSettings.lyricsOverlayLocked ? Qt.WindowTransparentForInput : 0)
+        Rectangle {
             anchors.fill: parent
-            anchors.margins: 16
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            wrapMode: Text.Wrap
-            font.pixelSize: 22
-            text: lyrics.lineAtPosition(player.position) || (lyrics.plainText ? lyrics.plainText.split("\n")[0] : "暂无同步歌词")
+            radius: 14
+            color: Qt.rgba(0.08, 0.10, 0.15, desktopSettings.lyricsOverlayOpacity)
+            border.color: Qt.rgba(1, 1, 1, Math.min(0.24, desktopSettings.lyricsOverlayOpacity / 2))
+            HoverHandler { id: overlayHover }
+            Label {
+                id: overlayLine
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 74
+                anchors.margins: 12
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: Text.Wrap
+                font.pixelSize: 24
+                font.bold: true
+                color: "#fff4e8"
+                style: Text.Outline
+                styleColor: "#b0000000"
+                text: lyrics.lineAtPosition(player.position) ||
+                      (lyrics.plainText ? lyrics.plainText.split("\n")[0] : "暂无歌词 · 可在主窗口导入或搜索")
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: !desktopSettings.lyricsOverlayLocked
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeAllCursor
+                    onPressed: floatingLyrics.startSystemMove()
+                    ToolTip.visible: containsMouse
+                    ToolTip.text: "按住拖动歌词浮窗"
+                }
+            }
+            RowLayout {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: 8
+                height: 42
+                visible: !desktopSettings.lyricsOverlayLocked && (overlayHover.hovered || floatingLyrics.previewControls)
+                spacing: 6
+                ToolButton { text: "上一首"; Material.foreground: "#fff4e8"; enabled: selectedIndex >= 0; onClicked: advance(false, true) }
+                ToolButton {
+                    text: player.playbackState === MediaPlayer.PlayingState ? "暂停" : "播放"
+                    Material.foreground: "#fff4e8"
+                    enabled: player.source.toString() !== ""
+                    onClicked: player.playbackState === MediaPlayer.PlayingState ? player.pause() : player.play()
+                    ToolTip.text: "播放/暂停"
+                    ToolTip.visible: hovered
+                }
+                ToolButton { text: "下一首"; Material.foreground: "#fff4e8"; enabled: selectedIndex >= 0; onClicked: advance(false, false) }
+                Label { text: "音量"; font.pixelSize: 12; color: "#fff4e8" }
+                Slider { Layout.preferredWidth: 102; from: 0; to: 1; value: desktopSettings.volume; onMoved: desktopSettings.volume = value }
+                Label { text: "底色"; font.pixelSize: 12; color: "#fff4e8" }
+                Slider { Layout.preferredWidth: 84; from: 0; to: 0.9; value: desktopSettings.lyricsOverlayOpacity; onMoved: desktopSettings.lyricsOverlayOpacity = value }
+                Item { Layout.fillWidth: true }
+                ToolButton { text: "锁定"; Material.foreground: "#fff4e8"; onClicked: desktopSettings.lyricsOverlayLocked = true; ToolTip.text: "锁定后鼠标点击会穿透浮窗；在主窗口解锁"; ToolTip.visible: hovered }
+                ToolButton { text: "关闭"; Material.foreground: "#fff4e8"; onClicked: floatingLyrics.visible = false }
+            }
         }
     }
 
@@ -444,6 +518,13 @@ ApplicationWindow {
                     elide: Text.ElideMiddle
                 }
                 Label { text: library.count + " 首"; color: "#d9a980" }
+                Button {
+                    text: "刷新曲库"
+                    enabled: !library.loading && library.sourceSummary !== "尚未添加音乐来源"
+                    onClicked: library.refresh()
+                    ToolTip.visible: hovered
+                    ToolTip.text: "在文件管理器删除音乐后，点这里更新曲目列表"
+                }
             }
         }
 
@@ -524,6 +605,12 @@ ApplicationWindow {
                     radius: 7
                     color: modelData.trackIndex === window.selectedIndex ? "#39404a" : (mouse.containsMouse ? "#252c36" : "transparent")
 
+                    MouseArea {
+                        id: mouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: window.playIndex(modelData.trackIndex)
+                    }
                     RowLayout {
                         anchors.fill: parent
                         anchors.leftMargin: 12
@@ -536,13 +623,11 @@ ApplicationWindow {
                             Label { Layout.fillWidth: true; text: modelData.title; elide: Text.ElideRight; font.bold: true }
                             Label { Layout.fillWidth: true; text: modelData.artist + "  ·  " + modelData.album; color: "#aab0b9"; elide: Text.ElideRight }
                         }
-                    }
-                    MouseArea {
-                        id: mouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: {
-                            window.playIndex(modelData.trackIndex)
+                        Button {
+                            text: "打开文件夹"
+                            onClicked: window.openTrackFolder(modelData.trackIndex)
+                            ToolTip.visible: hovered
+                            ToolTip.text: "打开原文件所在文件夹；删除后点击“刷新曲库”"
                         }
                     }
                 }
@@ -567,6 +652,21 @@ ApplicationWindow {
                     Button { text: "搜索歌词"; enabled: selectedIndex >= 0; onClicked: lyrics.search(library.titleAt(selectedIndex), library.artistAt(selectedIndex)) }
                     Button { text: "离线转写"; enabled: selectedIndex >= 0; onClicked: transcriptionDialog.open() }
                     Button { text: floatingLyrics.visible ? "关闭浮窗" : "歌词浮窗"; onClicked: floatingLyrics.visible = !floatingLyrics.visible }
+                    Button {
+                        visible: floatingLyrics.visible
+                        text: desktopSettings.lyricsOverlayLocked ? "解锁浮窗" : "锁定浮窗"
+                        onClicked: desktopSettings.lyricsOverlayLocked = !desktopSettings.lyricsOverlayLocked
+                        ToolTip.visible: hovered
+                        ToolTip.text: "锁定后浮窗可点击穿透；从这里解锁"
+                    }
+                    Button {
+                        visible: floatingLyrics.visible
+                        text: "浮窗归位"
+                        onClicked: {
+                            floatingLyrics.x = window.x + (window.width - floatingLyrics.width) / 2
+                            floatingLyrics.y = window.y + window.height - floatingLyrics.height - 150
+                        }
+                    }
                 }
                 ScrollView {
                     Layout.fillWidth: true
@@ -664,7 +764,7 @@ ApplicationWindow {
                         onActivated: playbackMode = currentText
                     }
                     Label { text: "音量"; color: "#aab0b9" }
-                    Slider { Layout.preferredWidth: 130; from: 0; to: 1; value: audioOutput.volume; onMoved: audioOutput.volume = value }
+                    Slider { Layout.preferredWidth: 130; from: 0; to: 1; value: desktopSettings.volume; onMoved: desktopSettings.volume = value }
                 }
             }
         }

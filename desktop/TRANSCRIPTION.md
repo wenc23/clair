@@ -1,17 +1,15 @@
-# 可选离线歌词转写适配器
+# 内置离线歌词转写（预览）
 
-`TranscriptionService` 是 Qt `QProcess` 适配器，**不是内置识别引擎**。应用和音频播放不依赖它。用户须自行选择三项本机文件：
+Windows/Linux 0.3.3 试用包自带 CPU 版 [whisper.cpp](https://github.com/ggml-org/whisper.cpp) `whisper-cli` 和多语种 `ggml-tiny-q5_1.bin`（约 32 MB）。用户在“歌词”页点击“离线转写”→“开始转写”即可；无需自行选择 FFmpeg、程序或模型。识别只在用户主动触发时运行，不上传音频。未打包的开发构建仍可在“高级设置”中自选程序和模型。
 
-1. FFmpeg 可执行文件，用于把 FLAC/MP3/WAV 等输入转换为 16 kHz、单声道、16-bit PCM WAV。
-2. [whisper.cpp](https://github.com/ggml-org/whisper.cpp) 的 `whisper-cli` 可执行文件；须支持 `-olrc` 和 `-of` 参数。
-3. 与该 `whisper-cli` 版本兼容的多语种 ggml 模型文件。建议先尝试 `base` 级别得到速度优先的草稿，质量不够再试 `small`；CPU/GPU 性能和音乐歌词准确率尚未实测，不能承诺具体耗时、准确率或“实时”效果。GPU 加速取决于用户自行安装的二进制版本。
+应用使用已有 Qt Multimedia/FFmpeg 媒体后端的 `QAudioDecoder` 在本机把音频转换成 16 kHz、单声道、16-bit PCM WAV，再异步调用 `whisper-cli` 生成行级 LRC。这样不额外分发一份 FFmpeg 命令行程序。成功结果缓存于用户缓存目录；输入音频、模型或识别程序变化后缓存失效。任务可取消，退出时终止子进程。不会修改原音频、同目录 LRC 或 Web 版曲库。
 
-仅当用户主动点击“离线转写”时调用。服务先在应用缓存下建立临时目录，转换音频，再让 whisper.cpp 生成带行级时间戳的 LRC；成功后写入按音频、工具和模型的路径/大小/修改时间计算的缓存。再次处理未变化的输入会直接读缓存。任务异步运行，可取消，不改写原音频文件或相邻歌词文件。只允许一个任务同时执行。应用退出时终止子进程。
+**这是待人工校对的草稿，不是准确歌词承诺。** tiny 模型省空间和 CPU，但歌曲伴奏、和声、拉长音、叠唱、语言自动判定及纯器乐都可能造成错词、漏词或幻觉。先检查已有本地 LRC 或在线歌词候选；找不到时再转写。CPU 速度取决于机器和曲目长度，不能称为实时字幕。高级设置选中的第三方可执行文件以当前用户权限运行，只能使用可信来源。
 
-**转写结果是待校对草稿**：歌曲的伴奏、和声、拉长音、叠唱及纯器乐可能造成漏词、错词或幻觉；不提供逐字高亮。用户应先在歌词页面检查，再决定是否另存/使用。缓存仅是本机数据；不上传音频或模型。注意选中的外部可执行文件会以当前用户权限运行，只能使用可信来源。`whisper.cpp`、FFmpeg 二进制及模型各自有独立的许可条款，正式分发前必须逐一核对；此预览版不捆绑这些工具或模型。
+## 捆绑组件与复现
 
-## 接入要点
+- whisper.cpp 源码：`v1.9.4`，提交 `927cfce34f31707e17f2bff35c349632fb9e2c3a`，MIT。Windows/Linux 均构建 CPU 版本，不要求 GPU。Windows 使用 MinGW 13.1；Linux 试用构建在 Ubuntu 24.04。
+- 模型：[ggerganov/whisper.cpp 的 `ggml-tiny-q5_1.bin`](https://huggingface.co/ggerganov/whisper.cpp/blob/main/ggml-tiny-q5_1.bin)，仓库版本 `5359861c739e955e79d9a303bcbc70fb988958b1`，模型卡标记 MIT；固定 SHA-256：`818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7`。该文件来自 OpenAI Whisper 权重的 ggml 量化版本；许可证见 `licenses/whisper-model-MIT.txt`。
+- Windows 打包脚本从 `-TranscriptionAssetsDir`（默认为构建目录内的 `transcription/`）复制 `whisper-cli.exe`、模型及 MinGW 运行库；Linux 打包脚本从第三参数（默认为构建目录内的 `transcription/`）复制 `whisper-cli` 和模型。两者在打包前校验模型 SHA-256，缺件即拒绝生成不完整试用包。二进制/模型不提交进 Git 仓库。
 
-在 `desktop/CMakeLists.txt` 的 `clair-desktop` 源文件列表增加 `src/transcriptionservice.{h,cpp}`；无需额外 Qt 模块，已有 `Qt6::Core`（由 Quick 依赖）即可。`main.cpp` 创建 `TranscriptionService`，以现有 QML context property 方式暴露。界面用三个 `FileDialog` 分别选择 FFmpeg、whisper-cli、模型文件，赋给 `ffmpegExecutable`、`whisperExecutable`、`modelFile`。当前曲目本机 URL 传给 `transcribe(audioUrl)`；“取消”按钮调用 `cancel()`。监听 `completed(lrcFile, fromCache)` 后，以已有 `LyricsService::importLrc(lrcFile)` 装入歌词页；不要在切歌后自动把旧曲转写结果装入新曲，需核对触发时的曲目 URL。`busy`、`status`、`resultFile` 可直接显示。
-
-单独测试目标包含 `tests/transcriptionservice_test.cpp`、`src/transcriptionservice.{h,cpp}`、`src/lyricsparser.{h,cpp}`，链接 `Qt6::Test`，用 `add_test(NAME transcription-service COMMAND ...)` 注册。测试用测试可执行文件自身模拟两个 CLI，不需要安装 FFmpeg/whisper.cpp/模型；覆盖成功、缓存、错误与取消。真实工具的音乐样本准确率仍须另测。
+单元测试以测试进程模拟识别 CLI，覆盖成功、缓存、错误与取消；可用 `CLAIR_TEST_BUNDLED_ASR_AUDIO` 对本地短音频进行真实模型端到端测试。Windows 已对 15 秒 MP3 片段验证了 Qt 解码→捆绑模型→LRC 流程；这证明管线可运行，**不证明歌词识别准确率**。macOS 尚无实机发行验证。

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(ClairDesktop VERSION 0.3.2 LANGUAGES CXX)
+project(ClairDesktop VERSION 0.3.3 LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -77,7 +77,7 @@ if(BUILD_TESTING)
         src/librarymodel.cpp
         src/librarymodel.h
     )
-    target_link_libraries(clair-library-tests PRIVATE Qt6::Concurrent Qt6::Test)
+    target_link_libraries(clair-library-tests PRIVATE Qt6::Concurrent Qt6::Gui Qt6::Test)
     add_test(NAME library-model COMMAND clair-library-tests)
 
     qt_add_executable(clair-media-tests tests/mediaformat_test.cpp)
@@ -111,7 +111,7 @@ if(BUILD_TESTING)
     qt_add_executable(clair-transcription-tests
         tests/transcriptionservice_test.cpp src/transcriptionservice.cpp src/transcriptionservice.h
         src/lyricsparser.cpp src/lyricsparser.h)
-    target_link_libraries(clair-transcription-tests PRIVATE Qt6::Test)
+    target_link_libraries(clair-transcription-tests PRIVATE Qt6::Multimedia Qt6::Test)
     add_test(NAME transcription-service COMMAND clair-transcription-tests)
     add_test(NAME desktop-startup COMMAND clair-desktop --smoke)
     set_tests_properties(desktop-startup PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 15)

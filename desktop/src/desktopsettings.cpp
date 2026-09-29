@@ -3,6 +3,9 @@
 #include <QDesktopServices>
 #include <QFileInfo>
 
+#include <algorithm>
+#include <cmath>
+
 DesktopSettings::DesktopSettings(QObject *parent)
     : QObject(parent), m_settings(QSettings::UserScope, "Clair", "ClairDesktop")
 {
@@ -30,6 +33,46 @@ QUrl DesktopSettings::lastLibraryFolder() const
 QStringList DesktopSettings::importedFiles() const
 {
     return m_settings.value("importedFiles").toStringList();
+}
+
+double DesktopSettings::lyricsOverlayOpacity() const
+{
+    return m_settings.value("lyricsOverlay/opacity", 0.38).toDouble();
+}
+
+void DesktopSettings::setLyricsOverlayOpacity(double opacity)
+{
+    if (!std::isfinite(opacity)) return;
+    opacity = std::clamp(opacity, 0.0, 0.9);
+    if (qFuzzyCompare(lyricsOverlayOpacity(), opacity)) return;
+    m_settings.setValue("lyricsOverlay/opacity", opacity);
+    emit lyricsOverlayChanged();
+}
+
+bool DesktopSettings::lyricsOverlayLocked() const
+{
+    return m_settings.value("lyricsOverlay/locked", false).toBool();
+}
+
+void DesktopSettings::setLyricsOverlayLocked(bool locked)
+{
+    if (lyricsOverlayLocked() == locked) return;
+    m_settings.setValue("lyricsOverlay/locked", locked);
+    emit lyricsOverlayChanged();
+}
+
+double DesktopSettings::volume() const
+{
+    return m_settings.value("playback/volume", 0.8).toDouble();
+}
+
+void DesktopSettings::setVolume(double volume)
+{
+    if (!std::isfinite(volume)) return;
+    volume = std::clamp(volume, 0.0, 1.0);
+    if (qFuzzyCompare(this->volume(), volume)) return;
+    m_settings.setValue("playback/volume", volume);
+    emit volumeChanged();
 }
 
 void DesktopSettings::setLastLibraryFolder(const QString &path)

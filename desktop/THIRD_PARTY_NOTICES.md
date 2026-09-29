@@ -7,5 +7,7 @@ Clair 自身代码按仓库根目录的 MIT `LICENSE` 授权。Windows/Linux 预
 | Qt 6.8.3（Core、Gui、Quick、QML、Multimedia 等） | 原生界面、音频、文件系统 | [Qt 6.8.3 源码](https://download.qt.io/official_releases/qt/6.8/6.8.3/single/)，本包按 LGPL-3.0-only 路径使用；参见 `licenses/LGPL-3.0.txt`、`licenses/GPL-3.0.txt` 和 Qt [开源义务说明](https://www.qt.io/licensing/open-source-lgpl-obligations)。 |
 | Qt Multimedia 所附 FFmpeg n7.1 运行库 | FLAC/MP3/WAV 等媒体解码 | [FFmpeg 源码](https://ffmpeg.org/releases/)与[许可证说明](https://ffmpeg.org/legal.html)；包内含 `avcodec`、`avformat`、`avutil`、`swresample`、`swscale` DLL，参见 `licenses/LGPL-2.1.txt`。实际编译配置与可选组件的许可证须在正式分发前再核对。 |
 | MinGW-w64 / GCC 13.1 运行库 | 仅 Windows 包内的 C++ 运行时 | [MinGW-w64](https://www.mingw-w64.org/licensing/)与 [GCC Runtime Library Exception](https://www.gnu.org/licenses/gcc-exception-3.1.html)。Linux 包使用目标发行版的系统级 C++/XCB/OpenGL 库。 |
+| whisper.cpp `v1.9.4`，提交 `927cfce34f31707e17f2bff35c349632fb9e2c3a` | 本机 CPU 歌词草稿识别 | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp/tree/v1.9.4)，MIT；见 `licenses/whisper.cpp-MIT.txt`。Windows 包的子目录同时包含所需 MinGW/GCC 运行库。 |
+| 多语种 `ggml-tiny-q5_1.bin` | 随包轻量语音模型 | [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/blob/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny-q5_1.bin)，模型卡标记 MIT；源于 [OpenAI Whisper](https://github.com/openai/whisper)，许可证见 `licenses/whisper-model-MIT.txt`。固定 SHA-256 为 `818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7`。 |
 
 Qt 安装包自带的 SPDX 软件物料清单位于便携包 `licenses/sbom/`，用于追踪组件来源。Clair 不修改 Qt/FFmpeg DLL，也不将它们静态链接入主程序。若你要公开再分发、修改或重新打包，请按对应许可证履行义务并核对实际 DLL 的完整依赖清单。

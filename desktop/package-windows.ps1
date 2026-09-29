@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)][string]$OutputDir,
     [string]$QtBin = "",
     [string]$CompilerBin = "",
-    [string]$QmlDir = ""
+    [string]$QmlDir = "",
+    [string]$TranscriptionAssetsDir = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +21,21 @@ $deploy = Join-Path $QtBin 'windeployqt.exe'
 if (-not (Test-Path -LiteralPath $deploy -PathType Leaf)) { throw "Missing windeployqt.exe: $deploy" }
 if (-not $QmlDir) { $QmlDir = Join-Path $PSScriptRoot 'qml' }
 if (-not (Test-Path -LiteralPath $QmlDir -PathType Container)) { throw "Missing QML directory: $QmlDir" }
+if (-not $TranscriptionAssetsDir) { $TranscriptionAssetsDir = Join-Path $BuildDir 'transcription' }
+$whisperCli = Join-Path $TranscriptionAssetsDir 'whisper-cli.exe'
+$tinyModel = Join-Path $TranscriptionAssetsDir 'ggml-tiny-q5_1.bin'
+foreach ($asset in @($whisperCli, $tinyModel)) {
+    if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) { throw "Missing bundled transcription asset: $asset" }
+}
+$expectedModelHash = '818710568DA3CA15689E31A743197B520007872FF9576237BDA97BD1B469C3D7'
+if ((Get-FileHash -LiteralPath $tinyModel -Algorithm SHA256).Hash -ne $expectedModelHash) {
+    throw "Bundled model SHA-256 does not match the pinned ggml-tiny-q5_1.bin"
+}
+foreach ($runtime in @('libgcc_s_seh-1.dll', 'libstdc++-6.dll', 'libwinpthread-1.dll', 'libgomp-1.dll')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $TranscriptionAssetsDir $runtime) -PathType Leaf)) {
+        throw "Missing bundled transcription runtime: $runtime"
+    }
+}
 
 New-Item -ItemType Directory -Path $outputFull | Out-Null
 Copy-Item -LiteralPath $sourceExe -Destination $outputFull
@@ -37,6 +53,11 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'PREVIEW_README.md') -Destinatio
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THEMES.md') -Destination (Join-Path $outputFull 'THEMES.md')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'TRANSCRIPTION.md') -Destination (Join-Path $outputFull 'TRANSCRIPTION.md')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'THIRD_PARTY_NOTICES.md') -Destination $outputFull
+$transcriptionOut = Join-Path $outputFull 'transcription'
+New-Item -ItemType Directory -Path $transcriptionOut | Out-Null
+foreach ($name in @('whisper-cli.exe', 'ggml-tiny-q5_1.bin', 'libgcc_s_seh-1.dll', 'libstdc++-6.dll', 'libwinpthread-1.dll', 'libgomp-1.dll')) {
+    Copy-Item -LiteralPath (Join-Path $TranscriptionAssetsDir $name) -Destination $transcriptionOut
+}
 $skillSource = Join-Path $PSScriptRoot '..\.codex\skills\clair-theme-crop'
 if (Test-Path -LiteralPath $skillSource -PathType Container) {
     $skillOut = Join-Path $outputFull 'theme-skill'

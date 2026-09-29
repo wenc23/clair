@@ -1,12 +1,14 @@
 #include "librarymodel.h"
 
 #include <QDir>
+#include <QDesktopServices>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QCryptographicHash>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSet>
@@ -238,6 +240,12 @@ void LibraryModel::clearFolder()
     reload();
 }
 
+void LibraryModel::refresh()
+{
+    if (!m_loading && (!m_rootDirectory.isEmpty() || !m_importedFiles.isEmpty()))
+        reload();
+}
+
 void LibraryModel::restoreSources(const QUrl &folder, const QStringList &files)
 {
     if (m_loading)
@@ -271,6 +279,35 @@ void LibraryModel::reload()
 QUrl LibraryModel::sourceAt(int index) const
 {
     return index >= 0 && index < m_tracks.size() ? QUrl::fromLocalFile(m_tracks.at(index).path) : QUrl();
+}
+
+bool LibraryModel::openTrackFolder(int index)
+{
+    if (index < 0 || index >= m_tracks.size()) {
+        setErrorString(QStringLiteral("请先选择一首曲目。"));
+        return false;
+    }
+    const QFileInfo file(m_tracks.at(index).path);
+    if (!file.isFile()) {
+        setErrorString(QStringLiteral("音乐文件已不存在；请刷新曲库。"));
+        return false;
+    }
+    bool opened = false;
+#ifdef Q_OS_WIN
+    opened = QProcess::startDetached(QStringLiteral("explorer.exe"),
+                                    {QStringLiteral("/select,"), QDir::toNativeSeparators(file.absoluteFilePath())});
+#elif defined(Q_OS_MACOS)
+    opened = QProcess::startDetached(QStringLiteral("open"),
+                                    {QStringLiteral("-R"), file.absoluteFilePath()});
+#endif
+    if (!opened)
+        opened = QDesktopServices::openUrl(QUrl::fromLocalFile(file.absolutePath()));
+    if (!opened) {
+        setErrorString(QStringLiteral("无法打开文件所在文件夹：") + file.absolutePath());
+        return false;
+    }
+    setErrorString({});
+    return true;
 }
 
 QString LibraryModel::titleAt(int index) const

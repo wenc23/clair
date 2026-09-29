@@ -28,6 +28,7 @@ private slots:
     void clearsOldTracksWhileSwitchingFolders();
     void rejectsInvalidFolder();
     void importsArbitraryFilesAndEditsTitles();
+    void refreshesAfterExternalDeletion();
 };
 
 void LibraryModelTest::scansGeneralMusicAndReadsLegacyIndexWithoutWriting()
@@ -156,6 +157,25 @@ void LibraryModelTest::importsArbitraryFilesAndEditsTitles()
     restored.removeImportedFile(restored.importedFiles().first());
     QTRY_VERIFY_WITH_TIMEOUT(!restored.loading(), 5000);
     QCOMPARE(restored.count(), 1);
+}
+
+void LibraryModelTest::refreshesAfterExternalDeletion()
+{
+    QTemporaryDir temporary;
+    QVERIFY(temporary.isValid());
+    const QString song = QDir(temporary.path()).filePath("song.mp3");
+    QVERIFY(writeFile(song));
+    LibraryModel model;
+    model.openFolder(QUrl::fromLocalFile(temporary.path()));
+    QTRY_VERIFY_WITH_TIMEOUT(!model.loading(), 5000);
+    QCOMPARE(model.count(), 1);
+    QVERIFY(!model.openTrackFolder(-1));
+    QVERIFY(QFile::remove(song));
+    QVERIFY(!model.openTrackFolder(0));
+    QVERIFY(model.errorString().contains(QStringLiteral("不存在")));
+    model.refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(!model.loading(), 5000);
+    QCOMPARE(model.count(), 0);
 }
 
 QTEST_GUILESS_MAIN(LibraryModelTest)

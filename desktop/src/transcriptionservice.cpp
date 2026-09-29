@@ -2,7 +2,10 @@
 
 #include "lyricsparser.h"
 
+#include <QAudioBuffer>
 #include <QCryptographicHash>
+#include <QCoreApplication>
+#include <QDataStream>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -15,6 +18,22 @@
 namespace {
 QString localPath(const QUrl &url) { return url.isLocalFile() ? url.toLocalFile() : QString(); }
 
+QString bundledPath(const QString &name)
+{
+    return QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("transcription/") + name);
+}
+
+QString bundledWhisper()
+{
+#ifdef Q_OS_WIN
+    return bundledPath(QStringLiteral("whisper-cli.exe"));
+#else
+    return bundledPath(QStringLiteral("whisper-cli"));
+#endif
+}
+
+QString bundledModel() { return bundledPath(QStringLiteral("ggml-tiny-q5_1.bin")); }
+
 QByteArray fileIdentity(const QString &path)
 {
     const QFileInfo info(path);
@@ -26,9 +45,22 @@ QByteArray fileIdentity(const QString &path)
 TranscriptionService::TranscriptionService(QObject *parent) : QObject(parent)
 {
     QSettings settings(QSettings::UserScope, "Clair", "ClairDesktop");
-    m_ffmpegPath = settings.value("transcription/ffmpeg").toString();
-    m_whisperPath = settings.value("transcription/whisper").toString();
-    m_modelPath = settings.value("transcription/model").toString();
+    const QString customWhisper = settings.value("transcription/whisper").toString();
+    const QString customModel = settings.value("transcription/model").toString();
+    m_whisperPath = validTool(customWhisper) ? customWhisper : bundledWhisper();
+    m_modelPath = QFileInfo(customModel).isFile() ? customModel : bundledModel();
+    QAudioFormat format;
+    format.setSampleRate(16000);
+    format.setChannelCount(1);
+    format.setSampleFormat(QAudioFormat::Int16);
+    m_decoder.setAudioFormat(format);
+    connect(&m_decoder, &QAudioDecoder::bufferReady, this, &TranscriptionService::decoderBufferReady);
+    connect(&m_decoder, &QAudioDecoder::finished, this, &TranscriptionService::decoderFinished);
+    connect(&m_decoder, QOverload<QAudioDecoder::Error>::of(&QAudioDecoder::error), this,
+            [this](QAudioDecoder::Error) {
+                if (m_phase == Phase::Conversion)
+                    fail(QStringLiteral("音频解码失败：") + m_decoder.errorString());
+            });
     connect(&m_process, &QProcess::finished, this, &TranscriptionService::processFinished);
     connect(&m_process, &QProcess::readyReadStandardOutput, this,
             [this] { m_process.readAllStandardOutput(); });
@@ -44,19 +76,12 @@ TranscriptionService::TranscriptionService(QObject *parent) : QObject(parent)
 
 TranscriptionService::~TranscriptionService()
 {
+    m_decoder.stop();
+    m_waveFile.close();
     if (m_process.state() != QProcess::NotRunning) {
         m_process.kill();
         m_process.waitForFinished(1000);
     }
-}
-
-void TranscriptionService::setFfmpegExecutable(const QUrl &file)
-{
-    const QString path = localPath(file);
-    if (path == m_ffmpegPath) return;
-    m_ffmpegPath = path;
-    QSettings(QSettings::UserScope, "Clair", "ClairDesktop").setValue("transcription/ffmpeg", path);
-    emit toolsChanged();
 }
 
 void TranscriptionService::setWhisperExecutable(const QUrl &file)
@@ -74,6 +99,21 @@ void TranscriptionService::setModelFile(const QUrl &file)
     if (path == m_modelPath) return;
     m_modelPath = path;
     QSettings(QSettings::UserScope, "Clair", "ClairDesktop").setValue("transcription/model", path);
+    emit toolsChanged();
+}
+
+bool TranscriptionService::ready() const
+{
+    return validTool(m_whisperPath) && QFileInfo(m_modelPath).isFile();
+}
+
+void TranscriptionService::useBundledTools()
+{
+    m_whisperPath = bundledWhisper();
+    m_modelPath = bundledModel();
+    QSettings settings(QSettings::UserScope, "Clair", "ClairDesktop");
+    settings.remove("transcription/whisper");
+    settings.remove("transcription/model");
     emit toolsChanged();
 }
 
@@ -106,8 +146,8 @@ bool TranscriptionService::validTool(const QString &path)
 
 QString TranscriptionService::cacheKey(const QString &audioPath) const
 {
-    QByteArray identity = "clair-whisper-lrc-v1\n";
-    for (const QString &path : {audioPath, m_modelPath, m_whisperPath, m_ffmpegPath}) {
+    QByteArray identity = "clair-whisper-lrc-v2-qt-decode\n";
+    for (const QString &path : {audioPath, m_modelPath, m_whisperPath}) {
         identity += fileIdentity(path);
         identity += '\n';
     }
@@ -122,8 +162,8 @@ void TranscriptionService::transcribe(const QUrl &audioFile)
     if (!QFileInfo(audioPath).isFile()) {
         setStatus(QStringLiteral("请选择本机存在的音频文件。")); return;
     }
-    if (!validTool(m_ffmpegPath) || !validTool(m_whisperPath) || !QFileInfo(m_modelPath).isFile()) {
-        setStatus(QStringLiteral("请先选择可执行的 ffmpeg、whisper-cli 和兼容的 ggml 模型文件。")); return;
+    if (!ready()) {
+        setStatus(QStringLiteral("内置离线转写组件缺失。请解压完整试用包，或在高级设置中选择自定义识别工具和模型。")); return;
     }
     const QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
                              + QStringLiteral("/transcriptions");
@@ -143,21 +183,62 @@ void TranscriptionService::transcribe(const QUrl &audioFile)
     }
     m_workspace = std::make_unique<QTemporaryDir>(QDir(cacheDir).filePath("job-XXXXXX"));
     if (!m_workspace->isValid()) { fail(QStringLiteral("无法创建临时转写目录。")); return; }
-    m_process.setProgram(m_ffmpegPath);
-    m_errorTail.clear();
-    m_process.setArguments({"-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", audioPath,
-                            "-vn", "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le",
-                            m_workspace->filePath("audio.wav")});
+    m_pcmBytes = 0;
+    m_waveFile.setFileName(m_workspace->filePath("audio.wav"));
+    if (!m_waveFile.open(QIODevice::WriteOnly) || m_waveFile.write(QByteArray(44, '\0')) != 44) {
+        fail(QStringLiteral("无法创建临时 WAV 文件。")); return;
+    }
     setPhase(Phase::Conversion);
-    setStatus(QStringLiteral("正在离线转换音频（16 kHz 单声道）…"));
-    m_process.start();
+    setStatus(QStringLiteral("正在本机解码音频（16 kHz 单声道）…"));
+    m_decoder.setSource(audioFile);
+    m_decoder.start();
+}
+
+void TranscriptionService::decoderBufferReady()
+{
+    if (m_phase != Phase::Conversion) return;
+    const QAudioBuffer buffer = m_decoder.read();
+    const auto format = buffer.format();
+    if (!buffer.isValid() || format.sampleRate() != 16000 || format.channelCount() != 1 ||
+        format.sampleFormat() != QAudioFormat::Int16) {
+        fail(QStringLiteral("音频解码器未提供 16 kHz 单声道 PCM；该音频暂不支持离线转写。"));
+        return;
+    }
+    const qint64 bytes = buffer.byteCount();
+    if (bytes <= 0 || m_pcmBytes + quint64(bytes) > 0xFFFFFFFFull - 36ull ||
+        m_waveFile.write(buffer.constData<char>(), bytes) != bytes) {
+        fail(QStringLiteral("写入临时音频失败或曲目过长。"));
+        return;
+    }
+    m_pcmBytes += quint64(bytes);
+}
+
+void TranscriptionService::decoderFinished()
+{
+    if (m_phase != Phase::Conversion) return;
+    if (m_pcmBytes == 0) { fail(QStringLiteral("音频解码结果为空。")); return; }
+    QByteArray header;
+    QDataStream stream(&header, QIODevice::WriteOnly);
+    stream.setByteOrder(QDataStream::LittleEndian);
+    stream.writeRawData("RIFF", 4);
+    stream << quint32(36 + m_pcmBytes);
+    stream.writeRawData("WAVEfmt ", 8);
+    stream << quint32(16) << quint16(1) << quint16(1) << quint32(16000)
+           << quint32(32000) << quint16(2) << quint16(16);
+    stream.writeRawData("data", 4);
+    stream << quint32(m_pcmBytes);
+    if (header.size() != 44 || !m_waveFile.seek(0) || m_waveFile.write(header) != 44) {
+        fail(QStringLiteral("无法完成临时 WAV 文件。")); return;
+    }
+    m_waveFile.close();
+    startRecognition();
 }
 
 void TranscriptionService::startRecognition()
 {
     const QString wav = m_workspace->filePath("audio.wav");
     if (!QFileInfo(wav).isFile() || QFileInfo(wav).size() == 0) {
-        fail(QStringLiteral("ffmpeg 未生成可用的 WAV 文件。")); return;
+        fail(QStringLiteral("音频解码器未生成可用的 WAV 文件。")); return;
     }
     m_process.setProgram(m_whisperPath);
     m_errorTail.clear();
@@ -180,13 +261,11 @@ void TranscriptionService::processFinished(int exitCode, QProcess::ExitStatus ex
     }
     if (exitStatus != QProcess::NormalExit || exitCode != 0) {
         const QString detail = QString::fromLocal8Bit(m_errorTail + m_process.readAllStandardError()).trimmed().right(500);
-        fail((phase == Phase::Conversion ? QStringLiteral("ffmpeg 转换失败")
-                                           : QStringLiteral("whisper.cpp 识别失败"))
+        fail(QStringLiteral("whisper.cpp 识别失败")
              + QStringLiteral("（退出码 %1）").arg(exitCode)
              + (detail.isEmpty() ? QString() : QStringLiteral("：") + detail));
         return;
     }
-    if (phase == Phase::Conversion) { startRecognition(); return; }
     const QString draftPath = m_workspace->filePath("draft.lrc");
     QFile draft(draftPath);
     if (!draft.open(QIODevice::ReadOnly)) {
@@ -214,14 +293,25 @@ void TranscriptionService::processFinished(int exitCode, QProcess::ExitStatus ex
 
 void TranscriptionService::fail(const QString &message)
 {
-    m_workspace.reset();
+    const Phase oldPhase = m_phase;
     setPhase(Phase::Idle);
+    if (oldPhase == Phase::Conversion) m_decoder.stop();
+    m_waveFile.close();
+    m_workspace.reset();
     setStatus(message);
 }
 
 void TranscriptionService::cancel()
 {
     if (!busy() || m_phase == Phase::Canceling) return;
+    if (m_phase == Phase::Conversion) {
+        setPhase(Phase::Idle);
+        m_decoder.stop();
+        m_waveFile.close();
+        m_workspace.reset();
+        setStatus(QStringLiteral("已取消离线转写。"));
+        return;
+    }
     setPhase(Phase::Canceling);
     setStatus(QStringLiteral("正在取消转写…"));
     m_process.kill();
